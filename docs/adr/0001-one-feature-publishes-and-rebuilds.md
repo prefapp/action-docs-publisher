@@ -4,7 +4,7 @@ Documentation from several source repos lands in one docs repo, and shared files
 
 ## Considered Options
 
-- **Publisher plus hub with a central Registry** (acme/source#1370, #1371) — rejected: every new Area needed a change in the docs repo, and two features had to agree on root, branch, image names and metadata rules that nothing checked.
+- **Publisher plus hub with a central Registry** — rejected: every new Area needed a change in the docs repo, and two features had to agree on root, branch, image names and metadata rules that nothing checked.
 - **Publisher writes the shared files in place, as before** — rejected: that is the race this work removes.
 - **Publisher rebuilds the whole Area from its Version folders on every publish** — chosen: the result depends only on the folders present, never on the order of publishes, so a summary cannot roll back, and a rejected push retries from a fresh fetch.
 
