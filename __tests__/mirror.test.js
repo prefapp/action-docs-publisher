@@ -219,6 +219,8 @@ describe('a push that publishes a mirror entry', () => {
     )
     const areaDir = `site/raw/${area}`
     seedDocs(world, {
+      // The Area was published by this repo once; a stale file in it is the publisher's to remove.
+      [`${areaDir}/.meta.json`]: meta({ source: 'acme/source', sourceRevision: 'a'.repeat(40), sourceBranch: 'main', date: DATE }),
       [`${areaDir}/stale.md`]: 'STALE\n',
       ...(parentExists ? { [`${CORE_DOCS}/.meta.json`]: mirrorMeta(source) } : {}),
     })

@@ -59,6 +59,8 @@ export function classifyStagedEffects(docs, { mirrors = [], releases = [], prune
   }
 }
 
+// What this run did to the docs branch: whether it pushed a commit, and that commit's SHA. A run that staged
+// nothing, or whose retries all landed on the branch tip without a commit, pushed nothing.
 export function publishWithRetry({ docs, branch, areaDirs, message, write }) {
   let rejection = ''
   for (let attempt = 1; attempt <= MAX_PUSH_ATTEMPTS; attempt++) {
@@ -74,12 +76,12 @@ export function publishWithRetry({ docs, branch, areaDirs, message, write }) {
     }
     const staged = areaDirs.filter((areaDir) => lstatOrNull(path.join(docs, areaDir)) !== null)
     for (const areaDir of staged) git(docs, ['add', '-A', '--', `:(literal)${areaDir}`])
-    if (gitStatus(docs, ['diff', '--staged', '--quiet']).status === 0) return false
+    if (gitStatus(docs, ['diff', '--staged', '--quiet']).status === 0) return { changed: false, commitSha: null }
     // A caller that cannot name the work until it has planned it passes a function: only what it changed is named.
     git(docs, ['commit', '--quiet', '-m', typeof message === 'function' ? message() : message])
 
     const push = gitRemote(docs, ['push', 'origin', `HEAD:refs/heads/${branch}`])
-    if (push.status === 0) return true
+    if (push.status === 0) return { changed: true, commitSha: git(docs, ['rev-parse', 'HEAD']) }
     rejection = push.stderr.trim()
     // The retry is otherwise invisible: say that the docs branch moved and why, so a slow run can be explained.
     const reason = rejection.split('\n').map((line) => line.trim()).filter(Boolean).at(-1) ?? 'no reason given'

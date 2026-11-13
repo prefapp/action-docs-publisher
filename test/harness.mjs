@@ -1,4 +1,3 @@
-import { afterAll } from '@jest/globals'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { setTimeout } from 'node:timers/promises'
 import {
@@ -13,34 +12,20 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import yaml from 'js-yaml'
-import renderer from '@firestartr/firestartr-features_renderer'
 
-const PACKAGE_DIR = fileURLToPath(new URL('..', import.meta.url))
-const CLAIM_PATH = resolve(PACKAGE_DIR, '..', '..', 'generic-fixtures', 'cr.yaml')
-
-export function renderInto(target, args) {
-  const claim = yaml.load(readFileSync(CLAIM_PATH, 'utf8'))
-  renderer.render(PACKAGE_DIR, target, claim, {}, args)
-  return target
-}
-
-export function renderTestArgs(name = 'release-shared-default-destination') {
-  const { tests } = yaml.load(readFileSync(join(PACKAGE_DIR, 'render_tests.yaml'), 'utf8'))
-  return tests.find((test) => test.name === name).args
-}
-
-const rendered = renderInto(realpathSync(mkdtempSync(join(tmpdir(), 'docs-publisher-rendered-'))), renderTestArgs())
-afterAll(() => rmSync(rendered, { recursive: true, force: true }))
+const TEST_DIR = fileURLToPath(new URL('.', import.meta.url))
+const PUBLISHER_DIR = join(TEST_DIR, '..', 'src', 'publisher')
 
 export function renderedScript(name) {
-  return join(rendered, '.github/scripts/docs-publisher', name)
+  return join(PUBLISHER_DIR, name)
 }
 
-export const SCRIPT = renderedScript('main.mjs')
+// The suite drives the publisher through the same argument shape the action builds from its inputs and the event,
+// in a child process, so every run has the exit code, environment and summary file a job gives it.
+export const SCRIPT = join(TEST_DIR, 'cli.mjs')
 export const ROOT = 'site/raw'
 export const BRANCH = 'main'
 export const ENTRIES_PATH = '.github/docs_publisher.yaml'
@@ -168,8 +153,8 @@ export function entriesJson(entries) {
   return `${JSON.stringify(entries, null, 2)}\n`
 }
 
-export function entriesFile(entries) {
-  return { [ENTRIES_PATH]: entriesJson(entries) }
+export function entriesFile(entries, file = ENTRIES_PATH) {
+  return { [file]: entriesJson(entries) }
 }
 
 export function packageFiles(name, intro = `# ${name}\n`) {
@@ -287,6 +272,8 @@ function publisherArgs(docs, options) {
     ...(planFile === undefined ? [] : ['--plan-file', planFile]),
     ...(before === undefined ? [] : ['--before', before]),
     ...(after === undefined ? [] : ['--after', after]),
+    ...(options.sourceToken === undefined ? [] : ['--source-token', options.sourceToken]),
+    ...(options.docsToken === undefined ? [] : ['--docs-token', options.docsToken]),
   ]
 }
 

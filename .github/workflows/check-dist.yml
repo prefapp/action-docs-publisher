@@ -1,0 +1,42 @@
+# In JavaScript actions, `dist/` is the code the runner executes: `action.yml` names `dist/index.js` as the entry
+# point, and the runner does not install dependencies. This workflow fails when the checked-in `dist/` is not what
+# building `src/` produces.
+name: Check Transpiled JavaScript
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  check-dist:
+    name: Check dist/
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        id: setup-node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Install Dependencies
+        id: install
+        run: npm ci
+
+      # The build writes `dist/` again and compares it with what is committed, so a stale bundle fails here with the
+      # same message a developer sees locally.
+      - name: Check dist/ matches src/
+        id: check
+        run: npm run check:dist

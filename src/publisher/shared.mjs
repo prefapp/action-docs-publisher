@@ -1,8 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { SEMVER_REGEX } from './entries.mjs'
-import { FatalError, assertRecordOwners, assertNoSymlinkPath, existingVersionFolders, folderNames, markerRecordAt, markerRecords, lstatOrNull, metaFile, put, readMarkerRecord, writeFile, writeSummary } from './files.mjs'
+import { FatalError, assertAreaWritable, assertRecordOwners, assertNoSymlinkPath, existingVersionFolders, folderNames, markerRecordAt, markerRecords, lstatOrNull, metaFile, put, readMarkerRecord, writeFile, writeSummary } from './files.mjs'
 import { scan } from './prune.mjs'
+import { docsRoot } from './root.mjs'
 
 // Ported from the former shared-file rebuilder. Build identifiers do not affect precedence.
 function compareSemver(left, right) {
@@ -97,8 +98,9 @@ function placementProblems(docs, root, areaDir, versions) {
     }
   }
   const records = scan(docs, root).records
+  const scope = docsRoot(root)
   const labels = { Version: 'Version folder', Branch: 'Branch Version folder', Mirror: 'mirror Area' }
-  for (let dir = areaDir; dir === root || dir.startsWith(`${root}/`); dir = path.posix.dirname(dir)) {
+  for (let dir = areaDir; scope.contains(dir); dir = path.posix.dirname(dir)) {
     const record = read(dir)
     if (record) problems.push(`refusing to publish ${areaDir}: it sits inside a ${labels[record.kind]} at ${dir}`)
     if (dir !== areaDir && records.some((record) => record.areaDir === dir && record.dir !== dir)) {
@@ -187,7 +189,10 @@ export function planSharedArea({ docs, root, entry, repository, branch, sourceBr
   const removals = []
   const rows = []
   const warnings = []
-  const url = (...segments) => `https://raw.githubusercontent.com/${docsRepository}/${branch}/${urlPath([root, ...segments])}`
+  // `name` is null for an unnamed release entry; join() would reject it, and the URL has no such segment.
+  const url = (...segments) => `https://raw.githubusercontent.com/${docsRepository}/${branch}/${urlPath([
+    path.posix.join(root, ...segments.filter(Boolean)),
+  ])}`
   for (const [name, group] of [...groups].sort(([a], [b]) => (a ?? '').localeCompare(b ?? ''))) {
     const sorted = [...group.values()].sort((a, b) => compareSemver(b.version, a.version) || a.version.localeCompare(b.version))
     const parent = path.posix.join(areaDir, ...(name ? [name] : []))
@@ -221,6 +226,10 @@ export function planSharedArea({ docs, root, entry, repository, branch, sourceBr
   for (const name of lstatOrNull(path.join(docs, areaDir))?.isDirectory() ? fs.readdirSync(path.join(docs, areaDir)) : []) {
     const rel = `${areaDir}/${name}`
     if (!lstatOrNull(path.join(docs, rel))?.isDirectory() && !files.has(rel)) removals.push(rel)
+  }
+  try { assertAreaWritable(docs, areaDir, files, removals) } catch (error) {
+    if (!(error instanceof FatalError)) throw error
+    problems.push(error.message)
   }
   for (const rel of removals) clearProblems(docs, root, rel, areaDir, problems)
   for (const rel of files.keys()) {

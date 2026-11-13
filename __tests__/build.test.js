@@ -141,32 +141,25 @@ describe('the environment of a build', () => {
     expect(readFile(readRemote(world), 'site/raw/core/crds/v1.2.0/index.yaml')).toBe(CRDS_INDEX)
   })
 
-  test('finds no token in its environment, and the token file is gone before it runs', () => {
+  test('finds no token in its environment, under none of the names it could be put in', () => {
     const entry = unnamedReleaseEntry({
-      build: 'echo "${GITHUB_TOKEN:-}|${GH_TOKEN:-}|${DOCS_PUBLISHER_DOCS_TOKEN_FILE:-}|${DOCS_PUBLISHER_SOURCE_TOKEN_FILE:-}|$(ls "$TOKENS")" > index.yaml',
+      build: 'echo "${GITHUB_TOKEN:-}|${GH_TOKEN:-}|${SOME_OTHER_NAME:-}" > index.yaml',
     })
     const source = makeSource(world)
     releaseCommit(source, { ...crdFiles(), ...entriesFile([entry]) }, 'v1.2.0', DATE)
-    const docs = cloneDocs(world)
-    const tokens = join(world.base, 'tokens')
-    mkdirSync(tokens)
-    writeFileSync(join(tokens, 'source'), 'source-token')
-    writeFileSync(join(tokens, 'docs'), 'docs-token')
 
-    const run = runPublisher(docs, {
+    // The action hands the token over in memory. A job that exports it too, under a name of its own, must not leak
+    // it into the build: the environment is scrubbed of every value the process holds as a token.
+    const run = runPublisher(cloneDocs(world), {
       source,
       tag: 'v1.2.0',
-      env: {
-        TOKENS: tokens,
-        GITHUB_TOKEN: 'ambient-token',
-        GH_TOKEN: 'ambient-token',
-        DOCS_PUBLISHER_SOURCE_TOKEN_FILE: join(tokens, 'source'),
-        DOCS_PUBLISHER_DOCS_TOKEN_FILE: join(tokens, 'docs'),
-      },
+      sourceToken: 'source-token',
+      docsToken: 'docs-token',
+      env: { GITHUB_TOKEN: 'ambient-token', GH_TOKEN: 'ambient-token', SOME_OTHER_NAME: 'source-token' },
     })
 
     expect(run.status).toBe(0)
-    expect(readFile(readRemote(world), 'site/raw/core/crds/v1.2.0/index.yaml')).toBe('||||\n')
+    expect(readFile(readRemote(world), 'site/raw/core/crds/v1.2.0/index.yaml')).toBe('||\n')
   })
 
   test('passes each token only to the git commands that fetch from or push to its remote', () => {
@@ -176,8 +169,6 @@ describe('the environment of a build', () => {
     const stubs = join(world.base, 'stubs')
     const log = join(stubs, 'git-log')
     mkdirSync(stubs)
-    writeFileSync(join(stubs, 'source-token'), 'source-token\n')
-    writeFileSync(join(stubs, 'docs-token'), 'docs-token\n')
     const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim()
     writeFileSync(join(stubs, 'git'), [
       '#!/bin/sh',
@@ -193,12 +184,12 @@ describe('the environment of a build', () => {
     const run = runPublisher(docs, {
       source: checkout,
       reconcile: true,
+      sourceToken: 'source-token',
+      docsToken: 'docs-token',
       env: {
         PATH: `${stubs}:${process.env.PATH}`,
         GIT_LOG: log,
         REAL_GIT: realGit,
-        DOCS_PUBLISHER_SOURCE_TOKEN_FILE: join(stubs, 'source-token'),
-        DOCS_PUBLISHER_DOCS_TOKEN_FILE: join(stubs, 'docs-token'),
       },
     })
 

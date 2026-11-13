@@ -70,7 +70,14 @@ export function planVersion({ source, root, entry, release, repository, date, ta
 // The Branch Version folder: the same content, built from the source branch tip, in the folder named after the
 // branch, with a marker that names the release Area and the branch and holds no tag.
 export function planBranchVersion({ source, root, entry, name, repository, branch, revision, date }) {
-  const dir = path.posix.join(root, entry.area, ...(name ? [name] : []), branch)
+  const areaDir = path.posix.join(root, entry.area)
+  const dir = path.posix.join(areaDir, ...(name ? [name] : []), branch)
+  // The folder is removed and rewritten whole, so it has to sit inside its Area whatever the branch name spells.
+  if (!dir.startsWith(`${areaDir}/`)) {
+    throw new FatalError(
+      `refusing to publish the Branch Version folder of the Area "${entry.area}" outside it: "${branch}" leaves the Area`,
+    )
+  }
   const files = collectPackage({
     source, entry, name, dir,
     marker: { source: repository, area: entry.area, branch, sourceRevision: revision, date },
@@ -136,12 +143,12 @@ function publishAtTag({ args, release, repository, root, date, tagSource }) {
   if (releases.length === 0) {
     // With candidates, the per-area lines above already say why; the generic hint is only for "no entry at all".
     if (candidates.length === 0) writeSummary(`Skipped \`${args.tag}\`: no release entry publishes it. Add entries to \`.github/docs_publisher.yaml\`.`)
-    return 0
+    return { changed: false, commitSha: null }
   }
   const published = releases.filter((entry) => entry.prereleases || !release.prerelease)
   if (published.length === 0) {
     writeSummary(`Skipped \`${args.tag}\`: a prerelease is published only by an entry with \`prereleases: true\`.`)
-    return 0
+    return { changed: false, commitSha: null }
   }
   const areas = published.map((entry) => {
     const name = folders.get(entry)
@@ -158,7 +165,7 @@ function publishAtTag({ args, release, repository, root, date, tagSource }) {
   // Which Areas this tag is already published in is decided against the docs branch as each attempt fetches
   // it, so a stale checkout or a rejected push cannot rewrite a Version another run already wrote.
   const kept = new Set()
-  const changed = publishWithRetry({
+  const { changed, commitSha } = publishWithRetry({
     docs: args.docs, branch: args.branch,
     areaDirs: areas.map((area) => area.areaDir),
     message: `docs: publish ${release.name ? `${release.name} ${release.version}` : release.version}`,
@@ -222,9 +229,9 @@ function publishAtTag({ args, release, repository, root, date, tagSource }) {
     if (kept.has(area)) writeSummary(`Already published \`${args.tag}\` in area \`${area.entry.area}\`: kept \`${area.versionDir}\` as it is.`)
   }
   for (const area of staleAreaFiles) keptAreaFilesSummary(area.areaDir, 'this release')
-  if (kept.size === areas.length) return 0
+  if (kept.size === areas.length) return { changed, commitSha }
   writeSummary(changed
     ? `Published \`${args.tag}\` to \`${args.branch}\` under \`${areas.find((area) => !kept.has(area)).versionDir}\`.`
     : `Nothing to publish for \`${args.tag}\`: the docs repo already holds it.`)
-  return 0
+  return { changed, commitSha }
 }

@@ -2,6 +2,7 @@
 import fs from 'node:fs'
 import { createHash } from 'node:crypto'
 import path from 'node:path'
+import { parse as parseYaml } from 'yaml'
 import { FatalError, GLOB_CHARS, namesGitPath } from './files.mjs'
 
 // Only settings that shape Version folder content belong in this hash.
@@ -59,6 +60,12 @@ export function nestedRepoPath(value) {
   const clean = path.posix.normalize(value).replace(/\/+$/, '')
   if (clean === '..' || clean.startsWith('../')) return { refusal: 'escapes' }
   return { path: clean }
+}
+
+// The entries file as the source repo's git names it: a push range and a plan's changed files are repo-relative, while
+// the action holds the absolute path it resolved against the workspace.
+export function entriesPath(source, entries) {
+  return path.relative(source, entries).split(path.sep).join('/')
 }
 
 function validateNoGitPath(value, label, fail) {
@@ -208,7 +215,9 @@ function validateBranchFolder(entry, sourceBranch, fail) {
   if (entry.publishSourceBranch !== true || sourceBranch === undefined) return
   const refuse = (why) => fail(`publishSourceBranch would publish an Area folder named "${sourceBranch}": ${why}`)
   if (sourceBranch === '') refuse('source_branch is empty')
-  else if (sourceBranch.includes('/')) refuse('a branch name cannot contain "/"')
+  else if (sourceBranch === '.' || sourceBranch === '..' || nestedRepoPath(sourceBranch).refusal) {
+    refuse('a Branch Version folder is one name inside the Area, not a path')
+  } else if (sourceBranch.includes('/')) refuse('a branch name cannot contain "/"')
   else if (isReservedName(sourceBranch)) {
     refuse('that name is reserved: a version, `latest`, `versions.json`, `index.json` or `.meta.json`')
   }
@@ -275,6 +284,8 @@ function rejectDuplicateAreas(entries) {
   }
 }
 
+// The entries file is the source repo's own file, written by hand in YAML. A JSON document is valid YAML, so a
+// file that holds one keeps being read.
 // `sourceBranch` is the branch the run publishes from, when the caller knows it: a release entry that publishes
 // its source branch names a folder after it, so a name that cannot be one is refused here, before anything is built.
 export function readEntries(file, sourceBranch) {
@@ -288,9 +299,11 @@ export function readEntries(file, sourceBranch) {
   if (text.trim() === '') return []
   let parsed
   try {
-    parsed = JSON.parse(text)
-  } catch {
-    throw new FatalError('entries: not valid JSON')
+    // The base workflow converted the file with `yq`, which resolves YAML merge keys (`<<: *anchor`). The `yaml`
+    // package leaves them unmerged in a 1.2 document unless asked, so an entries file written that way keeps working.
+    parsed = parseYaml(text, { merge: true })
+  } catch (error) {
+    throw new FatalError(`entries: not valid YAML: ${String(error.message).split('\n')[0]}`)
   }
   if (!Array.isArray(parsed)) {
     if (parsed === null) return []

@@ -15,13 +15,14 @@ import {
   tagExists,
   writeSummary,
 } from './files.mjs'
+import { docsRoot } from './root.mjs'
 
 // Prune makes the docs repo match the desired state: an Area whose entry is gone, or a package whose
 // folder is gone from the source repo, is deleted. It only touches folders whose .meta.json names this repo.
 
 // Prune never deletes outside the configured root, whatever the scan inferred or a plan asks for.
 function assertInsideRoot(root, rel) {
-  if (!rel.startsWith(`${root}/`)) {
+  if (!docsRoot(root).containsBelow(rel)) {
     throw new FatalError(`refusing to delete ${rel}: it is not under the docs root "${root}"`)
   }
 }
@@ -188,6 +189,7 @@ export function planPrune({ docs, source, root, repository, entries }) {
 
 // Deletes the planned folders and returns the paths to stage.
 export function applyPrune(docs, plan, root) {
+  const scope = docsRoot(root)
   const paths = []
   for (const { dir } of plan.removals) {
     assertInsideRoot(root, dir)
@@ -204,7 +206,7 @@ export function applyPrune(docs, plan, root) {
     paths.push(rel)
   }
   for (const rel of paths) {
-    for (let dir = path.posix.dirname(rel); dir.startsWith(`${root}/`); dir = path.posix.dirname(dir)) {
+    for (let dir = path.posix.dirname(rel); scope.containsBelow(dir); dir = path.posix.dirname(dir)) {
       if (!lstatOrNull(path.join(docs, dir))?.isDirectory() || fs.readdirSync(path.join(docs, dir)).length > 0) break
       fs.rmdirSync(path.join(docs, dir))
     }

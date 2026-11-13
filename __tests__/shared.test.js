@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from '@jest/globals'
-import { cloneDocs, entriesFile, featureFiles, makeDocsRemote, makeSource, readJson, readRemote, releaseCommit, releaseEntry, runPublisher, commitSource, git, readTree, readFile, exists, seedDocs, remoteCommitCount } from '../test/harness.mjs'
+import { cloneDocs, entriesFile, featureFiles, makeDocsRemote, makeSource, meta, readJson, readRemote, releaseCommit, releaseEntry, runPublisher, commitSource, git, readTree, readFile, exists, seedDocs, remoteCommitCount } from '../test/harness.mjs'
 
 let world
 beforeEach(() => { world = makeDocsRemote() })
@@ -43,6 +43,8 @@ describe('release shared files', () => {
     const source = makeSource(world)
     releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry({ mainFile: 'schema.json' })]) }, 'alpha-v1.0.0', DATE)
     seedDocs(world, {
+      // A marker anywhere in the Area says this repo published there, so the run may clear its stray files.
+      'site/raw/features/alpha/0.9.0/.meta.json': meta({ source: 'acme/source', tag: 'alpha-v0.9.0', date: DATE }),
       'site/raw/features/hand.txt': 'hand', 'site/raw/features/README.md': 'old',
       'site/raw/features/unrelated/keep.txt': 'keep',
     })

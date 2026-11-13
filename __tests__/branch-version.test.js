@@ -139,6 +139,24 @@ describe('a release entry that publishes its source branch', () => {
     expect(remoteCommitCount(world)).toBe(commits + 1)
   })
 
+  test('refuses a source branch that is not a git branch name before it can empty a folder outside the Area', () => {
+    const source = crdsSource()
+    // `..` would make the Branch Version folder the Area itself, and the replacement would delete every file in it.
+    seedDocs(world, { [`${CRDS_AREA}/hand-made.md`]: '# Hand made\n' })
+    const head = git(source, 'rev-parse', 'HEAD')
+    const before = remoteCommitCount(world)
+    const docs = cloneDocs(world, 'docs-invalid-branch')
+    const docsHead = git(docs, 'rev-parse', 'HEAD')
+
+    const run = runPublisher(docs, { source, before: head, after: head, sourceBranch: '..' })
+
+    expect(run.status).toBe(2)
+    expect(run.output).toContain('source-branch ".." is not a valid git branch name')
+    expect(readFile(readRemote(world), `${CRDS_AREA}/hand-made.md`)).toBe('# Hand made\n')
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(git(docs, 'rev-parse', 'HEAD')).toBe(docsHead)
+  })
+
   test('a release that rebuilds the Area keeps its branch folder', () => {
     const source = makeSource(world)
     releaseCommit(

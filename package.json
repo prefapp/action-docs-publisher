@@ -1,0 +1,45 @@
+{
+  "name": "action-docs-publisher",
+  "description": "Publish a repository's docs into the folders it owns in a central docs repo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "build": "node scripts/build.mjs",
+    "check:dist": "node scripts/build.mjs --check"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/prefapp/action-docs-publisher.git"
+  },
+  "author": "prefapp",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/prefapp/action-docs-publisher/issues"
+  },
+  "homepage": "https://github.com/prefapp/action-docs-publisher#readme",
+  "dependencies": {
+    "@actions/core": "^3.0.1",
+    "@actions/github": "^9.1.1",
+    "yaml": "^2.8.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "jest": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/__tests__/**/*.test.js"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/dist/"
+    ]
+  }
+}

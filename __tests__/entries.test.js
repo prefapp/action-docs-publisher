@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from '@jest/globals'
 import { join } from 'node:path'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import {
   ENTRIES_PATH,
   cloneDocs,
@@ -120,8 +122,70 @@ describe('reading the rendered entries', () => {
     expect(remoteCommitCount(world)).toBe(before)
   })
 
-  test('fails when the entries file is not valid JSON', () => {
-    expectRefused(publishWith('{"area": "features",', RELEASE), 'entries: not valid JSON')
+  test('reads the entries file as YAML, with comments and block values', () => {
+    const { run } = publishWith(
+      [
+        '# what this repo publishes',
+        '- area: features # the Area this repo owns',
+        '  mode: release',
+        '  packages: packages',
+        '  mainFile: intro.md',
+        '  collect:',
+        '    - { from: "templates/docs/*.md", to: . }',
+        '',
+      ].join('\n'),
+      RELEASE,
+    )
+
+    expect(run.status).toBe(0)
+    expect(readTree(readRemote(world), 'site/raw/features/docs_publisher/1.0.0')['intro.md']).toBe('# docs_publisher\n')
+  })
+
+  test('fails when the entries file is not valid YAML', () => {
+    expectRefused(publishWith('{"area": "features",', RELEASE), 'entries: not valid YAML')
+  })
+
+  test('resolves a merge key to its anchored entry, the way the base yq step did', () => {
+    // The base workflow converted the file with `yq`, which resolves `<<: *anchor`. Two entries that share an anchor
+    // are the same entries as the two written out in full.
+    const dir = mkdtempSync(join(tmpdir(), 'docs-publisher-entries-'))
+    const merged = join(dir, 'merged.yaml')
+    const written = join(dir, 'written.yaml')
+    writeFileSync(merged, [
+      '- &defaults',
+      '  area: alpha',
+      '  mode: release',
+      '  packages: packages',
+      '  mainFile: intro.md',
+      '  collect:',
+      '    - { from: "templates/docs/*.md", to: . }',
+      '  areaFiles:',
+      '    - { from: "README.md", to: "README.md" }',
+      '- <<: *defaults',
+      '  area: beta',
+      '',
+    ].join('\n'))
+    writeFileSync(written, [
+      '- area: alpha',
+      '  mode: release',
+      '  packages: packages',
+      '  mainFile: intro.md',
+      '  collect:',
+      '    - { from: "templates/docs/*.md", to: . }',
+      '  areaFiles:',
+      '    - { from: "README.md", to: "README.md" }',
+      '- area: beta',
+      '  mode: release',
+      '  packages: packages',
+      '  mainFile: intro.md',
+      '  collect:',
+      '    - { from: "templates/docs/*.md", to: . }',
+      '  areaFiles:',
+      '    - { from: "README.md", to: "README.md" }',
+      '',
+    ].join('\n'))
+
+    expect(readEntries(merged)).toEqual(readEntries(written))
   })
 
   test('treats a null document as no entries, so a release publishes nothing', () => {
@@ -582,8 +646,24 @@ describe('publishSourceBranch names a folder inside the Area', () => {
     expect(remoteCommitCount(world)).toBe(before)
   })
 
-  test('is refused on a mirror entry', () => {
-    expectRefused(
+  test.each(['..', '../outside', '.'])(
+    'refuses the source branch %p as a Branch Version folder, before it can name a path outside the Area',
+    (sourceBranch) => {
+      const source = makeSource(world, `branch-path-source-${++seq}`)
+      commitSource(
+        source,
+        { ...featureFiles('docs_publisher'), ...entriesFile([releaseEntry({ publishSourceBranch: true })]) },
+        'entries',
+      )
+
+      expect(() => readEntries(join(source, ENTRIES_PATH), sourceBranch)).toThrow(
+        `entry 1 (area "features"): publishSourceBranch would publish an Area folder named "${sourceBranch}": ` +
+          'a Branch Version folder is one name inside the Area, not a path',
+      )
+    },
+  )
+
+  test('is refused on a mirror entry', () => {    expectRefused(
       publishWith([mirrorEntry({ publishSourceBranch: true })], RELEASE),
       '"publishSourceBranch" is not allowed on a mirror entry',
     )

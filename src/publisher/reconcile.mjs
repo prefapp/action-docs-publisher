@@ -11,6 +11,7 @@ import {
 } from './entries.mjs'
 import {
   FatalError,
+  assertAreaWritable,
   readAreaFiles,
   assertAreaPlacement,
   assertBranchReplaceable,
@@ -37,6 +38,7 @@ import { planBranchVersions, planVersion } from './release.mjs'
 import { classifyStagedEffects, publishWithRetry, sourceBranchMoved, syncToBranch } from './push.mjs'
 import { NO_PRUNE, applyPrune, planPrune, pruneSummary, stalePruneSummary } from './prune.mjs'
 import { mirrorSummary, planMirrorWrites, prepareMirrors, writeMirrors } from './mirror.mjs'
+import { docsRoot } from './root.mjs'
 
 function readReconcileArea(source, docs, root, entry, prune) {
   const areaDir = path.posix.join(root, entry.area)
@@ -252,8 +254,10 @@ export function planReconcileWrites(docs, areas, { source, repository, root, sou
           report.branchStale.push(branch.dir)
           continue
         }
-        // The folder is replaced whole below, so its path and its owners are checked here, before any removal.
+        // The folder is replaced whole below, so its path and its owners are checked here, before any removal. A
+        // folder with no marker of its own is hand-made, and the replacement would delete its files.
         assertBranchReplaceable(docs, root, branch.dir, area.entry.area, repository)
+        assertAreaWritable(docs, branch.dir, new Set(), [branch.dir])
         // Only a folder whose marker moves is a change: the build output of one branch tip is one folder.
         const marker = `${branch.dir}/.meta.json`
         const existing = lstatOrNull(path.join(docs, marker))?.isFile() ? fs.readFileSync(path.join(docs, marker), 'utf8') : null
@@ -340,6 +344,7 @@ export function prepareReconcile({ args, repository, root, prune }) {
 }
 
 export function publishReconcile({ args, repository, root }) {
+  const scope = docsRoot(root)
   const entries = readEntries(args.entries, args['source-branch'])
   syncToBranch(args.docs, args.branch)
   const pruneArgs = { docs: args.docs, source: args.source, root, repository, entries }
@@ -348,7 +353,7 @@ export function publishReconcile({ args, repository, root }) {
   const { mirrors } = prepareMirrors({
     args: { ...args, before: undefined, after: undefined }, repository, root,
   })
-  if (areas.length === 0 && mirrors.length === 0 && !initial.hasWork) return 0
+  if (areas.length === 0 && mirrors.length === 0 && !initial.hasWork) return { changed: false, commitSha: null }
   let report
   let prune = initial
   let sourceMoved = false
@@ -356,7 +361,7 @@ export function publishReconcile({ args, repository, root }) {
   let committed
   let releaseEffects = []
   const names = areas.map((area) => area.entry.area).join(' ')
-  const changed = publishWithRetry({
+  const { changed, commitSha } = publishWithRetry({
     docs: args.docs,
     branch: args.branch,
     areaDirs: [...areas, ...mirrors].map((area) => area.areaDir),
@@ -365,7 +370,7 @@ export function publishReconcile({ args, repository, root }) {
       const changedNames = [...committed.releases, ...committed.mirrors].map((area) => area.area)
       return changedNames.length > 0
         ? `docs: reconcile ${changedNames.join(' ')}`
-        : `docs: prune ${committed.prune.removals.map(({ dir }) => dir.slice(root.length + 1)).join(' ')}`
+        : `docs: prune ${committed.prune.removals.map(({ dir }) => scope.relative(dir)).join(' ')}`
     },
     write: () => {
       // Prune only from a source checkout that is still the branch tip: a retry after the branch moved would
@@ -420,5 +425,5 @@ export function publishReconcile({ args, repository, root }) {
     }),
   )
   mirrorSummary(changed ? committed.mirrors : mirrors, args.branch, changed)
-  return 0
+  return { changed, commitSha }
 }

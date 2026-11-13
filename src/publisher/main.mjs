@@ -1,9 +1,5 @@
-#!/usr/bin/env node
-
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { FatalError, appendSummary, namesGitPath, takeCredential, writeSummary } from './files.mjs'
-import { TAG_PATTERN, UNNAMED_TAG_PATTERN, matchTag, nestedRepoPath, readEntries } from './entries.mjs'
+import { FatalError, assertBranchName, namesGitPath, writeSummary } from './files.mjs'
+import { TAG_PATTERN, UNNAMED_TAG_PATTERN, entriesPath, nestedRepoPath, readEntries } from './entries.mjs'
 import { publishReconcile } from './reconcile.mjs'
 import { publishPushUpdates, pushChangedFiles } from './mirror.mjs'
 import { publishRelease } from './release.mjs'
@@ -11,35 +7,14 @@ import { planReconcile } from './plan.mjs'
 import { planPrune, stalePruneSummary } from './prune.mjs'
 import { sourceBranchMoved, syncToBranch } from './push.mjs'
 
-const REQUIRED_OPTIONS = ['source', 'docs', 'entries', 'root', 'branch', 'source-branch', 'docs-repository']
-
-function parseArgs(argv) {
-  const options = {}
-  for (let i = 0; i < argv.length; i++) {
-    const flag = argv[i]
-    if (flag === '--reconcile' || flag === '--plan') {
-      options[flag.slice(2)] = true
-      continue
-    }
-    if (!flag?.startsWith('--') || argv[i + 1] === undefined) {
-      throw new FatalError(`expected --option value pairs, got "${flag}"`)
-    }
-    options[flag.slice(2)] = argv[i + 1]
-    i++
-  }
-  for (const name of REQUIRED_OPTIONS) {
-    if (options[name] === undefined) throw new FatalError(`missing --${name}`)
-  }
-  return options
-}
-
 function readDestination({ root, branch }) {
   if (branch === '') throw new FatalError('branch must not be empty')
   if (namesGitPath(root)) throw new FatalError(`root "${root}" uses ".git", the Git administrative folder`)
   const { path: clean, refusal } = nestedRepoPath(root)
   if (refusal === 'escapes') throw new FatalError(`root must not leave the repo: "${root}"`)
   if (refusal) throw new FatalError(`root must be a relative path inside the repo: "${root}"`)
-  if (clean !== root || clean === '.') {
+  // `.` is the checkout itself, and accepted as it is spelled. Every other form has to be the normalized folder it names.
+  if (clean !== root) {
     throw new FatalError(`root "${root}" must be a normalized folder inside the docs checkout`)
   }
   return { root: clean, branch }
@@ -53,61 +28,51 @@ function publishPush({ args, repository, root }) {
   const entries = readEntries(args.entries, args['source-branch'])
   syncToBranch(args.docs, args.branch)
   const prune = planPrune({ docs: args.docs, source: args.source, root, repository, entries })
-  if (!prune.hasWork) return publishPushUpdates({ args, repository, root })
+  if (!prune.hasWork) return { output: 'push', ...publishPushUpdates({ args, repository, root }) }
   if (sourceBranchMoved(args.source, args['source-branch'])) {
     stalePruneSummary(args['source-branch'])
-    return publishPushUpdates({ args, repository, root })
+    return { output: 'push', ...publishPushUpdates({ args, repository, root }) }
   }
   writeSummary('This push needs a prune, so it ran a reconcile.')
-  return publishReconcile({ args, repository, root })
+  return { output: 'reconcile', ...publishReconcile({ args, repository, root }) }
 }
 
-async function main(argv) {
-  const parsed = parseArgs(argv)
-  const args = { ...parsed, ...readDestination(parsed) }
-  takeCredential(args.source, process.env.DOCS_PUBLISHER_SOURCE_TOKEN_FILE)
-  takeCredential(args.docs, process.env.DOCS_PUBLISHER_DOCS_TOKEN_FILE)
-  if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(args['docs-repository'])) throw new FatalError('docs-repository must be org/repo')
-  if (args.plan) {
-    if (args.tag !== undefined || args.reconcile) throw new FatalError('--plan runs without --tag or --reconcile')
-    for (const name of ['plan-file', 'before', 'after']) {
-      if (!args[name]) throw new FatalError(`missing --${name} for --plan`)
-    }
-  }
-  if (args.reconcile && args.tag !== undefined) throw new FatalError('--reconcile runs without --tag')
-  const release = args.tag === undefined ? null : matchTag(args.tag)
-  if (args.tag !== undefined && !release) {
-    writeSummary(`Skipped \`${args.tag}\`: it is not a \`${TAG_PATTERN}\` or \`${UNNAMED_TAG_PATTERN}\` release tag.`)
-    return 0
-  }
+const UNCHANGED = { changed: false, commitSha: null }
+
+// What a run did, for the action's outputs: the mode it ran as, whether it pushed a commit to the docs branch, and
+// that commit's SHA. A push reports `reconcile` when it escalates, and `push` when it only publishes updates.
+//
+// `mode` is picked from the Actions event by the caller: `release` (a published tag), `reconcile` (a manual run),
+// `push` (both ends of the push range) or `plan` (a pull request's base and head), plus `skipped` for a release tag
+// the publisher cannot read as a release. The publisher itself never looks at the event.
+export function publish(args, mode) {
+  const target = readDestination(args)
+  // The docs branch and the source branch are names git applies, and the source branch also names a folder inside
+  // each Area: every mode refuses a name git would, before it builds a path from either.
+  assertBranchName(target.branch, 'branch')
+  assertBranchName(args['source-branch'] ?? '', 'source-branch')
+  // A plan and a push read the range the event carries; every mode that does not have one leaves the args as they are.
+  const range = mode.before !== undefined || mode.after !== undefined ? { before: mode.before, after: mode.after } : {}
+  const run = { ...args, ...target, ...range }
+  const root = run.root
+  if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(run['docs-repository'])) throw new FatalError('docs-repository must be org/repo')
   const repository = process.env.GITHUB_REPOSITORY
   if (!repository) throw new FatalError('GITHUB_REPOSITORY is not set')
-  const root = args.root
-
-  if (args.plan) return planReconcile({ args, repository, root })
-  if (args.reconcile) return publishReconcile({ args, repository, root })
-  if (release) return publishRelease({ args, release, repository, root })
-  if (args.before !== undefined || args.after !== undefined) {
-    const changed = pushChangedFiles(args.source, args.before, args.after)
-    if (changed === null || changed.includes('.github/docs_publisher.yaml')) {
-      return publishReconcile({ args, repository, root })
+  if (mode.kind === 'skipped') {
+    writeSummary(`Skipped \`${mode.tag}\`: it is not a \`${TAG_PATTERN}\` or \`${UNNAMED_TAG_PATTERN}\` release tag.`)
+    return { output: 'skipped', ...UNCHANGED }
+  }
+  if (mode.kind === 'plan') return { output: 'plan', ...planReconcile({ args: run, repository, root }) }
+  if (mode.kind === 'reconcile') return { output: 'reconcile', ...publishReconcile({ args: run, repository, root }) }
+  if (mode.kind === 'release') {
+    return { output: 'release', ...publishRelease({ args: { ...run, tag: mode.tag }, release: mode.release, repository, root }) }
+  }
+  if (mode.kind !== 'push') throw new FatalError(`unknown run mode: ${mode.kind}`)
+  if (run.before !== undefined || run.after !== undefined) {
+    const changed = pushChangedFiles(run.source, run.before, run.after)
+    if (changed === null || changed.includes(entriesPath(run.source, run.entries))) {
+      return { output: 'reconcile', ...publishReconcile({ args: run, repository, root }) }
     }
   }
-  return publishPush({ args, repository, root })
-}
-
-const isMain = process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-if (isMain) {
-  main(process.argv.slice(2)).then(
-    (code) => {
-      process.exitCode = code
-    },
-    (error) => {
-      if (error instanceof FatalError) {
-        console.error(`docs_publisher: ${error.message}`)
-        appendSummary(error.message)
-      } else console.error(error)
-      process.exitCode = 2
-    },
-  )
+  return publishPush({ args: run, repository, root })
 }

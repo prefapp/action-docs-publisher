@@ -363,6 +363,26 @@ describe('push reconciliation', () => {
     expect(git(docs, 'status', '--porcelain')).toBe('')
   })
 
+  test('escalates when only a custom entries file changed', () => {
+    const entriesPath = '.config/publisher.yaml'
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([], entriesPath) }, 'alpha-v1.0.0', DATE)
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, entriesFile([releaseEntry()], entriesPath), 'custom entries file')
+    const after = git(source, 'rev-parse', 'HEAD')
+    const checkout = cloneSource(world, source, 'custom-entries-push')
+    const commits = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world, 'custom-entries-docs'), {
+      source: checkout, entries: join(checkout, entriesPath), before, after,
+    })
+
+    expect(run.status).toBe(0)
+    expect(remoteCommitCount(world)).toBe(commits + 1)
+    // A push publishes no Version folder; the reconcile an entries-file change escalates to publishes it.
+    expect(exists(readRemote(world), 'site/raw/features/alpha/1.0.0/.meta.json')).toBe(true)
+  })
+
   test('runs a reconcile for a push that retires a package, and says why', () => {
     const source = makeSource(world)
     releaseCommit(source, {

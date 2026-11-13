@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { SEMVER_REGEX, areaProblem, matchTag } from './entries.mjs'
+import { docsRoot } from './root.mjs'
 
 export class FatalError extends Error {}
 
@@ -42,18 +43,40 @@ export function gitStatus(cwd, args) {
   return spawnSync('git', args, { cwd, encoding: 'utf8' })
 }
 
+// A branch name the publisher hands to git or turns into a folder. `git check-ref-format --branch` is the rule the
+// server applies, so `..`, a space or a leading dash is refused before it can name a path outside the Area.
+export function assertBranchName(value, label) {
+  if (spawnSync('git', ['check-ref-format', '--branch', value]).status !== 0) {
+    throw new FatalError(`${label} "${value}" is not a valid git branch name`)
+  }
+}
+
 // The token of each checkout's remote, by checkout path. No checkout keeps credentials in its git config, and no
 // token is in the environment: a build command runs code from the source repo, at old tags too, and must find none.
 const credentials = new Map()
 
-const TOKEN_FILE_VARIABLES = ['DOCS_PUBLISHER_SOURCE_TOKEN_FILE', 'DOCS_PUBLISHER_DOCS_TOKEN_FILE']
+// Every token this process holds, so a build command's environment can be scrubbed of its value wherever it
+// appears, not only of the names the caller is known to put it in.
+const secrets = new Set()
 
-// The workflow hands each token over in a file. Reading it deletes it, so the token lives only in this process.
-export function takeCredential(cwd, file) {
-  if (!file) return
-  const token = fs.readFileSync(file, 'utf8').trim()
-  fs.rmSync(file)
-  if (token) credentials.set(path.resolve(cwd), token)
+// The caller hands each token over in memory: reading it from the environment would leave it where a build command
+// can see it. From here the token lives only in this process, and only the git commands that need it receive it.
+export function setCredential(cwd, token) {
+  if (!token) return
+  credentials.set(path.resolve(cwd), token)
+  secrets.add(token)
+}
+
+// The environment a git command that talks to the server needs: the token goes in one header, as
+// actions/checkout would have stored in the git config, and never into the checkout's own config.
+export function tokenEnvironment(token) {
+  const server = process.env.GITHUB_SERVER_URL ?? 'https://github.com'
+  return {
+    ...process.env,
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: `http.${server}/.extraheader`,
+    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
+  }
 }
 
 // A git command that talks to the checkout's remote. The token goes to that one command, as the header
@@ -61,22 +84,17 @@ export function takeCredential(cwd, file) {
 export function gitRemote(cwd, args) {
   const token = credentials.get(path.resolve(cwd))
   if (!token) return gitStatus(cwd, args)
-  const server = process.env.GITHUB_SERVER_URL ?? 'https://github.com'
-  return spawnSync('git', args, {
-    cwd,
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      GIT_CONFIG_COUNT: '1',
-      GIT_CONFIG_KEY_0: `http.${server}/.extraheader`,
-      GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
-    },
-  })
+  return spawnSync('git', args, { cwd, encoding: 'utf8', env: tokenEnvironment(token) })
 }
 
+// The environment a build command inherits. The tokens the caller put in it, and any variable whose value a token
+// is, are gone before the command starts: this is the guarantee that a build command never sees a token.
 function buildEnvironment() {
   const env = { ...process.env }
-  for (const name of ['GITHUB_TOKEN', 'GH_TOKEN', ...TOKEN_FILE_VARIABLES]) delete env[name]
+  for (const name of ['GITHUB_TOKEN', 'GH_TOKEN', 'INPUT_DOCS-TOKEN', 'INPUT_GITHUB-TOKEN']) delete env[name]
+  for (const [name, value] of Object.entries(env)) {
+    if (secrets.has(value)) delete env[name]
+  }
   return env
 }
 
@@ -318,6 +336,7 @@ export function ownershipProblem(area, owner, repository) {
 // One reader for every marker: its body and location together establish the kind, owner and Area. No caller
 // trusts partial metadata or guesses a Branch Version folder's Area from its path.
 export function readMarkerRecord(bytes, marker, root) {
+  const scope = docsRoot(root)
   const invalid = (outsideRoot = false) => {
     const error = new FatalError(`invalid .meta.json: ${marker}`)
     error.outsideRoot = outsideRoot
@@ -329,7 +348,7 @@ export function readMarkerRecord(bytes, marker, root) {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata) || !text('source') || !text('date')) invalid()
   if (!/^\d{4}-\d{2}-\d{2}T/.test(metadata.date) || !Number.isFinite(Date.parse(metadata.date))) invalid()
   const dir = path.posix.dirname(marker)
-  if (!dir.startsWith(`${root}/`)) invalid(true)
+  if (!scope.containsBelow(dir)) invalid(true)
   if ('tag' in metadata) {
     if (!text('tag') || (metadata.specHash !== undefined &&
         (typeof metadata.specHash !== 'string' || !/^[a-f0-9]{64}$/.test(metadata.specHash)))) invalid()
@@ -338,7 +357,7 @@ export function readMarkerRecord(bytes, marker, root) {
     if (!release || path.posix.basename(dir) !== release.version) invalid()
     const parent = path.posix.dirname(dir)
     const areaDir = release.name ? path.posix.dirname(parent) : parent
-    if (!areaDir.startsWith(`${root}/`)) invalid(true)
+    if (!scope.containsBelow(areaDir)) invalid(true)
     return { ...metadata, kind: 'Version', dir, areaDir, name: release.name ? path.posix.basename(parent) : null,
       version: release.version, packageDir: release.name ? parent : null }
   }
@@ -351,7 +370,7 @@ export function readMarkerRecord(bytes, marker, root) {
     const areaDir = path.posix.join(root, metadata.area)
     const relative = dir.startsWith(`${areaDir}/`) ? dir.slice(areaDir.length + 1) : ''
     const segments = relative.split('/')
-    if (!areaDir.startsWith(`${root}/`) || !relative || segments.length > 2 || segments.at(-1) !== metadata.branch) invalid()
+    if (!scope.containsBelow(areaDir) || !relative || segments.length > 2 || segments.at(-1) !== metadata.branch) invalid()
     return { ...metadata, kind: 'Branch', dir, areaDir, name: segments.length === 2 ? segments[0] : null }
   }
   if (!text('sourceBranch')) invalid()
@@ -374,7 +393,9 @@ export function markerRecords(docs, root, base = root, onInvalid) {
   const records = []
   const walk = (dir) => {
     for (const name of folderNames(path.join(docs, dir)).sort()) {
-      const child = `${dir}/${name}`
+      // A docs root of `.` scans the checkout itself: its `.git` folder is Git's, never an Area's.
+      if (namesGitPath(name)) continue
+      const child = path.posix.join(dir, name)
       // Discovery never follows a marker symlink; the write and prune tree guards refuse affected links.
       if (lstatOrNull(path.join(docs, child, '.meta.json'))?.isSymbolicLink()) { walk(child); continue }
       let record
@@ -398,15 +419,17 @@ export function assertMarkerOwner(record, area, repository) {
 }
 
 export function assertRecordOwners(records, areaDirs, root, repository) {
+  const scope = docsRoot(root)
   const affected = new Set(areaDirs)
   const problems = records.filter((record) => affected.has(record.areaDir) && record.source !== repository)
-    .map((record) => ownershipProblem(record.areaDir.slice(root.length + 1), record.source, repository))
+    .map((record) => ownershipProblem(scope.relative(record.areaDir), record.source, repository))
   if (problems.length) throw new FatalError([...new Set(problems)].join('\n'))
 }
 
 export function assertAreaPlacement(docs, areaDir, root, mode, plannedFiles) {
+  const scope = docsRoot(root)
   assertNoSymlinkPath(docs, areaDir)
-  for (let dir = areaDir; dir === root || dir.startsWith(`${root}/`); dir = path.posix.dirname(dir)) {
+  for (let dir = areaDir; scope.contains(dir); dir = path.posix.dirname(dir)) {
     const marker = `${dir}/.meta.json`
     const planned = plannedFiles.get(marker)?.content
     const record = planned === undefined ? markerRecordAt(docs, root, dir) : readMarkerRecord(planned, marker, root)
@@ -506,6 +529,47 @@ export function keptAreaFilesSummary(areaDir, run) {
 // A push publishes the rest even when one Area cannot be rebuilt, so it names the problem and leaves the repair to a run.
 export function areaFileProblemsSummary(areaDir, problem) {
   writeSummary(`Kept the Area files of \`${areaDir}\`: ${problem}; run a manual run to repair it.`)
+}
+
+// True when a folder holds a `.meta.json` anywhere below it: an Area, a Version folder or a nested Area. It is the
+// evidence that a source repo published there, whatever the marker says.
+function holdsMarker(docs, dir) {
+  const walk = (rel) => {
+    for (const name of fs.readdirSync(path.join(docs, rel)).sort()) {
+      if (name === GIT_DIR) continue
+      const child = `${rel}/${name}`
+      const stat = lstatOrNull(path.join(docs, child))
+      if (name === '.meta.json') return true
+      if (stat?.isDirectory() && walk(child)) return true
+    }
+    return false
+  }
+  return walk(dir)
+}
+
+// A folder can already sit at an Area path, made by hand and owned by nobody: the docs repo's own `docs/`, a
+// leftover, a folder from before this action. An Area with no marker anywhere in it has no owner, so a run that
+// would delete part of it stops instead, naming the folder and the first paths it would lose. Files the run plans to
+// write are its own and may replace a same-named file, so it only refuses over paths it would delete unplanned.
+export function assertAreaWritable(docs, areaDir, planned, removals) {
+  if (!lstatOrNull(path.join(docs, areaDir))?.isDirectory() || holdsMarker(docs, areaDir)) return
+  const unknown = []
+  const collect = (rel) => {
+    const stat = lstatOrNull(path.join(docs, rel))
+    if (!stat) return
+    if (stat.isDirectory()) {
+      for (const name of fs.readdirSync(path.join(docs, rel)).sort()) collect(`${rel}/${name}`)
+      return
+    }
+    if (!planned.has(rel)) unknown.push(rel)
+  }
+  for (const rel of removals) collect(rel)
+  if (unknown.length === 0) return
+  const shown = unknown.slice(0, 3).map((rel) => `\`${rel}\``).join(', ')
+  const more = unknown.length > 3 ? ` and ${unknown.length - 3} more` : ''
+  throw new FatalError(
+    `refusing to publish \`${areaDir}\`: the folder holds no .meta.json, so it is not an Area this repo published, and this run would delete ${shown}${more}. Choose another Area or remove the folder by hand.`,
+  )
 }
 
 // Empties an Area folder but keeps nested Areas (folders with a .meta.json) that are not in plannedDirs.

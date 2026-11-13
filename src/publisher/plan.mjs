@@ -1,12 +1,14 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { readEntries } from './entries.mjs'
+import { entriesPath, readEntries } from './entries.mjs'
 import {
   FatalError,
+  TagContentError,
   assertAreaPlacement,
   assertNoNestedWrites,
   assertNoSymlinkPath,
+  collectFiles,
   commitDate,
   git,
   lstatOrNull,
@@ -18,9 +20,14 @@ import {
 import { planReconcileSharedAreas, planReconcileWrites, prepareReconcile, skippedReconcileLines } from './reconcile.mjs'
 import { applyPrune, planPrune, scan } from './prune.mjs'
 import { planMirrorWrites } from './mirror.mjs'
+import { docsRoot } from './root.mjs'
 
-const MARKER = '<!-- docs-publisher-plan -->'
-const IRRELEVANT = '<!-- docs-publisher-plan-irrelevant -->'
+// The plan's first line, and the notice that there is nothing to plan: the action finds the comment it wrote
+// earlier by the marker, and posts no comment at all for a notice with nothing to replace.
+export const PLAN_MARKER = '<!-- docs-publisher-plan -->'
+export const IRRELEVANT_MARKER = '<!-- docs-publisher-plan-irrelevant -->'
+const MARKER = PLAN_MARKER
+const IRRELEVANT = IRRELEVANT_MARKER
 
 // A PR that no longer touches docs still gets a plan file, so the workflow can update the sticky
 // comment it posted earlier. The flag keeps the workflow from creating a comment for a never-relevant PR.
@@ -55,15 +62,36 @@ function planRemovals({ args, prune, observed, add }) {
   return changedAreas
 }
 
+// The paths the mirror's collect rules would write, which the hand-made Area guard must see as planned: the plan
+// writes no bytes, but it must agree with the run about whether the folder is refused. A rule the build would satisfy
+// cannot be expanded here, so that Area's destinations stay unknown and the plan makes no refusal claim for it.
+function mirrorDestinations({ args, areaDir, entry }) {
+  const destinations = new Set([`${areaDir}/.meta.json`])
+  for (const rule of entry.collect) {
+    try {
+      for (const file of collectFiles(args.source, rule)) destinations.add(path.posix.join(areaDir, file.to))
+    } catch (error) {
+      if (error instanceof TagContentError) return null
+      throw error
+    }
+  }
+  return destinations
+}
+
 // Metadata-only placeholders let the existing placement guards see Mirror Areas without running their builds.
 // They carry no collected content and are never written, even to the snapshot.
 function mirrorPlaceholders({ args, repository, root, entries, sourceRevision, changedAreas, add }) {
   return entries.filter((entry) => entry.mode === 'mirror').map((entry) => {
     const areaDir = path.posix.join(root, entry.area)
     if (!changedAreas.has(areaDir) && !lstatOrNull(path.join(args.docs, areaDir))) add(areaDir, '- Add Mirror Area.')
-    return { area: entry.area, areaDir, files: new Map([[`${areaDir}/.meta.json`, metaFile({
-      source: repository, sourceRevision, sourceBranch: args['source-branch'], date: commitDate(args.source, sourceRevision),
-    })]]) }
+    return {
+      area: entry.area,
+      areaDir,
+      destinations: mirrorDestinations({ args, areaDir, entry }),
+      files: new Map([[`${areaDir}/.meta.json`, metaFile({
+        source: repository, sourceRevision, sourceBranch: args['source-branch'], date: commitDate(args.source, sourceRevision),
+      })]]),
+    }
   })
 }
 
@@ -94,7 +122,11 @@ function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
   // A Branch Version marker names its release Area, so it can prove the Area belongs to another repo: the plan says
   // so instead of listing the writes and the deletions it would make there.
   if (lstatOrNull(path.join(args.docs, root))) {
-    fs.cpSync(path.join(args.docs, root), path.join(snapshot, root), { recursive: true, verbatimSymlinks: true })
+    fs.cpSync(path.join(args.docs, root), path.join(snapshot, root), {
+      recursive: true, verbatimSymlinks: true,
+      // With a docs root of `.` the plan copies the checkout itself; `.git` is Git's, and the plan never reads it.
+      filter: (source) => path.basename(source) !== '.git',
+    })
   }
   applyPrune(snapshot, prune, root)
   const reconcile = planReconcileWrites(snapshot, areas, {
@@ -122,30 +154,24 @@ function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
     || mirrors.some((mirror) => !lstatOrNull(path.join(args.docs, mirror.areaDir)))
 }
 
-// The workflow converts the YAML entries file before this script runs and hands over yq's message, so a
-// PR plan can report bad YAML instead of the job failing before plan mode.
-function entriesConversionProblem() {
-  const file = process.env.DOCS_PUBLISHER_ENTRIES_ERROR
-  if (!file || !fs.existsSync(file)) return null
-  return fs.readFileSync(file, 'utf8').trim() || null
-}
-
 export function planReconcile({ args, repository, root }) {
+  const scope = docsRoot(root)
   let snapshot
   let hasChanges = false
   const changes = new Map()
   const problems = []
   try {
-    const conversionProblem = entriesConversionProblem()
-    if (conversionProblem) throw new FatalError(conversionProblem)
+    // The entries file is read here, so a file that is not valid YAML is a planning problem the comment reports,
+    // not a failure before plan mode: no other mode reaches the docs repo without a valid file.
     const entries = readEntries(args.entries, args['source-branch'])
+    const entriesRel = entriesPath(args.source, args.entries)
     const changed = git(args.source, ['diff', '--no-renames', '--name-only', '-z', `${args.before}...${args.after}`]).split('\0').filter(Boolean)
     const packages = entries.filter((entry) => entry.mode === 'release' && entry.packages !== undefined)
       .map((entry) => path.posix.normalize(entry.packages).replace(/\/$/, ''))
-    if (!changed.includes('.github/docs_publisher.yaml') && !packages.some((folder) => changed.some((file) => folder === '.' || file.startsWith(`${folder}/`)))) {
+    if (!changed.includes(entriesRel) && !packages.some((folder) => changed.some((file) => folder === '.' || file.startsWith(`${folder}/`)))) {
       writeSummary('Skipped plan: no changed entries file or release package folder.')
       writeIrrelevantPlan(args['plan-file'])
-      return 0
+      return { changed: false, commitSha: null }
     }
     snapshot = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'docs-publisher-plan-'))
     hasChanges = assemblePlan({ args, repository, root, entries, snapshot, changes })
@@ -153,7 +179,7 @@ export function planReconcile({ args, repository, root }) {
     if (!(error instanceof FatalError)) throw error
     // Git and build errors can contain absolute paths; the comment only names repo-relative paths.
     let message = error.message
-    for (const [absolute, relative] of [[snapshot, '.'], [args.entries, '.github/docs_publisher.yaml'], [args.docs, '.'], [args.source, '.']]) {
+    for (const [absolute, relative] of [[snapshot, '.'], [args.entries, entriesPath(args.source, args.entries)], [args.docs, '.'], [args.source, '.']]) {
       if (absolute) message = message.replaceAll(`${absolute}/`, '').replaceAll(absolute, relative)
     }
     problems.push(...message.split('\n').filter(Boolean))
@@ -162,10 +188,10 @@ export function planReconcile({ args, repository, root }) {
   }
   const lines = [MARKER, '## Docs publisher plan', '', 'Mirror content changes are not listed; mirror builds do not run in plan mode.']
   for (const [areaDir, items] of [...changes].sort(([a], [b]) => a.localeCompare(b))) {
-    lines.push('', `### \`${areaDir.slice(root.length + 1)}\``, ...items)
+    lines.push('', `### \`${scope.relative(areaDir)}\``, ...items)
   }
   if (!hasChanges && problems.length === 0) lines.push('', 'No changes to add, republish, delete or replace.')
   if (problems.length) lines.push('', 'This change would fail to publish:', ...[...new Set(problems)].map((problem) => `- ${problem}`))
   fs.writeFileSync(args['plan-file'], `${lines.join('\n')}\n`)
-  return 0
+  return { changed: false, commitSha: null }
 }

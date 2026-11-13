@@ -1,8 +1,9 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { readEntries } from './entries.mjs'
+import { entriesPath, readEntries } from './entries.mjs'
 import {
+  assertAreaWritable,
   FatalError,
   readAreaFiles,
   assertAreaPlacement,
@@ -47,8 +48,6 @@ export function pushChangedFiles(source, before, after) {
 function matchesPush(entry, changed) {
   return entry.paths.some((pattern) => changed.some((file) => matchesGlob(path.posix.normalize(pattern), file)))
 }
-
-const ENTRIES_FILE = '.github/docs_publisher.yaml'
 
 function planMirrors({ source, root, repository, entries, sourceRevision, sourceBranch }) {
   const date = commitDate(source, sourceRevision)
@@ -140,6 +139,12 @@ export function planMirrorWrites({ args, repository, mirrors, releaseFiles = new
         `refusing to publish ${area.areaDir}: it sits inside the release Area ${releaseArea}, and a Mirror Area cannot sit inside a release Area. Choose another Area.`,
       )
     }
+    // A mirror replaces its Area as a whole, so a folder with no marker anywhere in it is refused rather than cleared.
+    // A plan placeholder names the paths its collect rules would write, so plan and run refuse the same folders; a plan
+    // that could not expand the rules (`destinations: null`) leaves the question to the run instead of guessing.
+    if (area.destinations === null) continue
+    const planned = new Set([...plannedFiles.keys(), ...(area.destinations ?? [])])
+    assertAreaWritable(docs, area.areaDir, planned, [area.areaDir])
   }
   return writable
 }
@@ -164,13 +169,14 @@ export function prepareMirrors({ args, repository, root }) {
   }
   syncToBranch(args.docs, args.branch)
   const sourceRevision = git(args.source, ['rev-parse', 'HEAD'])
+  const entriesRel = entriesPath(args.source, args.entries)
   const isPush = args.before !== undefined || args.after !== undefined
   const matched = mirrors.filter((entry) => {
     const previous = markerRecordAt(args.docs, root, path.posix.join(root, entry.area))
     assertMarkerOwner(previous, entry.area, repository)
     const touched = isPush && previous?.sourceBranch === args['source-branch']
       ? pushChangedFiles(args.source, previous.sourceRevision, sourceRevision) : null
-    return touched === null || touched.includes(ENTRIES_FILE) || matchesPush(entry, touched)
+    return touched === null || touched.includes(entriesRel) || matchesPush(entry, touched)
   })
   for (const entry of mirrors) {
     if (!matched.includes(entry)) {
@@ -257,9 +263,13 @@ function planPushAttempt({ args, repository, root, mirrors, sourceRevision, area
   assertRecordOwners(scan(args.docs, root).records, areaFileSources.map((source) => source.areaDir), root, repository)
   // A Branch Version folder is replaced whole once the plan is written, so the run checks it while planning, outside the
   // per-Area containment: a symlinked parent folder would otherwise be emptied before the write guard refused it, and a
-  // folder another repo owns would be replaced.
+  // folder another repo owns would be replaced. A folder with no marker of its own is hand-made too, and the replacement
+  // would delete its files: the same guard the Area gets covers it.
   for (const { area, branches } of shared) {
-    for (const branch of branches) assertBranchReplaceable(args.docs, root, branch.dir, area, repository)
+    for (const branch of branches) {
+      assertBranchReplaceable(args.docs, root, branch.dir, area, repository)
+      assertAreaWritable(args.docs, branch.dir, new Set(), [branch.dir])
+    }
   }
   return {
     shared,
@@ -314,9 +324,9 @@ export function publishPushUpdates({ args, repository, root }) {
   const areaFileSources = touched === null ? [] : entries
     .filter((entry) => entry.mode === 'release' && (entry.areaFiles.length > 0 || entry.publishSourceBranch === true))
     .map((entry) => ({ entry, areaDir: path.posix.join(root, entry.area), changed: touched, state: null }))
-  if (mirrors.length === 0 && areaFileSources.length === 0) return 0
+  if (mirrors.length === 0 && areaFileSources.length === 0) return { changed: false, commitSha: null }
   let attempt
-  const changed = publishWithRetry({
+  const { changed, commitSha } = publishWithRetry({
     docs: args.docs,
     branch: args.branch,
     areaDirs: mirrors.map((area) => area.areaDir),
@@ -337,5 +347,5 @@ export function publishPushUpdates({ args, repository, root }) {
   for (const areaDir of staleAreaFiles) keptAreaFilesSummary(areaDir, 'this push')
   for (const [areaDir, problem] of problems) areaFileProblemsSummary(areaDir, problem)
   mirrorSummary(changed ? attempt.committed.mirrors : attempt.writable, args.branch, changed)
-  return 0
+  return { changed, commitSha }
 }

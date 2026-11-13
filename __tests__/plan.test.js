@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from '@jest/globals'
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { ENTRIES_PATH, cloneDocs, cloneSource, commitSource, entriesFile, featureFiles, git, makeDocsRemote, makeSource, releaseCommit, releaseEntry, runPublisher, seedDocs, meta, mirrorEntry, mirrorMeta } from '../test/harness.mjs'
+import { isAbsolute, join } from 'node:path'
+import { ENTRIES_PATH, cloneDocs, cloneSource, commitSource, entriesFile, featureFiles, git, makeDocsRemote, makeSource, readFile, readRemote, releaseCommit, releaseEntry, runPublisher, seedDocs, meta, mirrorEntry, mirrorMeta } from '../test/harness.mjs'
 
 let world
 beforeEach(() => { world = makeDocsRemote() })
@@ -24,7 +24,7 @@ function bytes(dir) {
 }
 
 function plan(source, before, extra = {}) {
-  const { prepare, ...options } = extra
+  const { prepare, entries, ...options } = extra
   const checkout = cloneSource(world, source, `source-${Math.random()}`)
   const head = git(checkout, 'rev-parse', 'HEAD')
   git(checkout, 'checkout', '--quiet', '--detach', head)
@@ -39,7 +39,8 @@ function plan(source, before, extra = {}) {
   prepare?.(checkout)
   const run = runPublisher(docs, {
     source: checkout, plan: true, planFile, before, after: head,
-    ...options, env: { RUNNER_TEMP: snapshots, ...options.env },
+    ...options, ...(entries === undefined ? {} : { entries: isAbsolute(entries) ? entries : join(checkout, entries) }),
+    env: { RUNNER_TEMP: snapshots, ...options.env },
   })
   expect(readdirSync(snapshots)).toEqual([])
   expect(git(docs, 'rev-parse', 'HEAD')).toBe(docsHead)
@@ -127,26 +128,35 @@ describe('pull request plans', () => {
     const before = git(source, 'rev-parse', 'HEAD')
     const run = plan(source, before, { entries: join(world.base, 'missing-entries.json') })
     expect(run.status).toBe(0)
-    expect(run.body).toContain('This change would fail to publish:\n- entries file not found: .github/docs_publisher.yaml')
+    expect(run.body).toContain('This change would fail to publish:\n- entries file not found: ../missing-entries.json')
     expect(run.body).not.toContain(world.base)
   })
 
-  test('reports an entries YAML conversion failure as a planning problem with exit zero', () => {
+  test('reports an entries file that is not valid YAML as a planning problem with exit zero', () => {
     const source = makeSource(world)
     commitSource(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) })
     const before = git(source, 'rev-parse', 'HEAD')
-    commitSource(source, { 'packages/alpha/schema.json': '{"head":true}\n' })
-    const errorFile = join(world.base, 'conversion-error.txt')
-    const run = plan(source, before, {
-      prepare: (checkout) => writeFileSync(
-        errorFile,
-        `Error: bad file '${join(checkout, ENTRIES_PATH)}': yaml: line 3: did not find expected node content\n`,
-      ),
-      env: { DOCS_PUBLISHER_ENTRIES_ERROR: errorFile },
-    })
+    // A broken entries file is always a planning problem, whether or not its own change is what shows up here: the
+    // plan reads it before it decides anything.
+    commitSource(source, { [ENTRIES_PATH]: '- area: alpha\n  mode: [release\n' })
+    const run = plan(source, before)
     expect(run.status).toBe(0)
-    expect(run.body).toContain("This change would fail to publish:\n- Error: bad file '.github/docs_publisher.yaml': yaml: line 3: did not find expected node content")
+    expect(run.body).toContain('This change would fail to publish:\n- entries: not valid YAML:')
     expect(run.body).not.toContain(world.base)
+  })
+
+  test('plans when only a custom entries file changed', () => {
+    const entriesPath = '.config/publisher.yaml'
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([], entriesPath) }, 'alpha-v1.0.0', DATE)
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, entriesFile([releaseEntry()], entriesPath), 'custom entries file')
+
+    const run = plan(source, before, { entries: entriesPath })
+
+    expect(run.status).toBe(0)
+    expect(run.body).toContain('- Add version `alpha/1.0.0`.')
+    expect(run.summary).not.toContain('Skipped plan')
   })
 
   test('still fails on unexpected filesystem errors instead of claiming a valid plan', () => {
@@ -382,5 +392,52 @@ describe('pull request plans', () => {
     expect(run.body).toContain('### `features`')
     expect(run.body).toContain('- Add version `alpha/1.0.0`.')
     expect(run.body).not.toContain('would fail to publish')
+  })
+})
+
+describe('a plan over an unmarked Mirror Area folder', () => {
+  test.each(['site/raw', '.'])('agrees with the reconcile that overwrites it (root %s)', (root) => {
+    const at = (rel) => (root === '.' ? rel : `${root}/${rel}`)
+    seedDocs(world, { [at('core/docs/index.md')]: '# Hand made\n' })
+    const source = makeSource(world)
+    commitSource(source, { 'docs/index.md': '# Docs\n', ...entriesFile([]) })
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, entriesFile([mirrorEntry()]))
+
+    const planned = plan(source, before, { root })
+
+    expect(planned.status).toBe(0)
+    expect(planned.body).not.toContain('would fail to publish')
+
+    const suffix = Math.random().toString(36).slice(2)
+    const run = runPublisher(cloneDocs(world, `docs-mirror-${suffix}`), {
+      source: cloneSource(world, source, `checkout-mirror-${suffix}`), root, reconcile: true,
+    })
+    expect(run.status).toBe(0)
+    expect(readFile(readRemote(world), at('core/docs/index.md'))).toBe('# Docs\n')
+  })
+
+  test.each(['site/raw', '.'])('reports the file the reconcile then refuses to delete (root %s)', (root) => {
+    const at = (rel) => (root === '.' ? rel : `${root}/${rel}`)
+    seedDocs(world, { [at('core/docs/hand-made/notes.md')]: '# Notes\n' })
+    const source = makeSource(world)
+    commitSource(source, { 'docs/index.md': '# Docs\n', ...entriesFile([]) })
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, entriesFile([mirrorEntry()]))
+
+    const planned = plan(source, before, { root })
+
+    expect(planned.status).toBe(0)
+    expect(planned.body).toContain('This change would fail to publish:')
+    expect(planned.body).toContain(`refusing to publish \`${at('core/docs')}\``)
+    expect(planned.body).toContain(at('core/docs/hand-made/notes.md'))
+
+    const suffix = Math.random().toString(36).slice(2)
+    const run = runPublisher(cloneDocs(world, `docs-mirror-${suffix}`), {
+      source: cloneSource(world, source, `checkout-mirror-${suffix}`), root, reconcile: true,
+    })
+    expect(run.status).toBe(2)
+    expect(run.output).toContain(`refusing to publish \`${at('core/docs')}\``)
+    expect(readFile(readRemote(world), at('core/docs/hand-made/notes.md'))).toBe('# Notes\n')
   })
 })

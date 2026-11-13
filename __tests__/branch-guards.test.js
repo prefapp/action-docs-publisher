@@ -35,7 +35,7 @@ const CRDS = 'kind: CustomResourceDefinition\n'
 const CRDS_AREA = 'site/raw/core/crds'
 const FEATURES_AREA = 'site/raw/features'
 const OWNERSHIP = 'Area "core/crds" belongs to other/producer, but this repo is acme/source. Choose another Area.'
-const README = readFileSync(new URL('../templates/docs/README.md', import.meta.url), 'utf8')
+const README = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
 
 // The sentence the ownership guard returns, complete: the README quotes it as it is.
 const ownership = (area) =>
