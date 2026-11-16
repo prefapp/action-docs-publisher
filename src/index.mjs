@@ -45,13 +45,16 @@ async function main() {
   const docs = docsCheckoutPath(runnerTemp())
   removeDocsCheckout(docs)
   try {
-    cloneDocsRepository({ docs, repository: inputs.docsRepository, branch: inputs.branch, token: inputs.docsToken, server: serverUrl() })
-    setCommitIdentity(docs, await botIdentity(inputs.docsToken))
+    // A skipped run reads nothing from the docs repo, so it neither clones it nor asks the API for the bot identity.
+    if (mode.kind !== 'skipped') {
+      cloneDocsRepository({ docs, repository: inputs.docsRepository, branch: inputs.branch, token: inputs.docsToken, server: serverUrl() })
+      setCommitIdentity(docs, await botIdentity(inputs.docsToken))
 
-    // Each token goes to the git commands of the checkout it belongs to, and to no build command: `files.mjs` strips
-    // it from the environment the build inherits.
-    setCredential(source, inputs.githubToken)
-    setCredential(docs, inputs.docsToken)
+      // Each token goes to the git commands of the checkout it belongs to, and to no build command: `files.mjs` strips
+      // it from the environment the build inherits.
+      setCredential(source, inputs.githubToken)
+      setCredential(docs, inputs.docsToken)
+    }
 
     const result = publish(
       {

@@ -301,6 +301,22 @@ describe('the action when it cannot start', () => {
     expect(run.output).toContain('::error::docs_publisher: could not fetch the docs branch "release" from origin:')
     expect(run.summary).toContain('could not fetch the docs branch "release" from origin:')
   })
+
+  test('skips a tag that is not a release without reaching the docs repo', async () => {
+    const source = makeSource(world)
+    commitSource(source, entriesFile([]))
+
+    const run = await runAction({
+      event: 'release',
+      payload: { release: { tag_name: 'nightly' } },
+      workspace: source,
+      inputs: { 'INPUT_DOCS-BRANCH': 'release' },
+    })
+
+    expect(run.status).toBe(0)
+    expect(run.outputs).toEqual({ 'run-mode': 'skipped', 'docs-changed': 'false' })
+    expect(run.summary).toContain('Skipped `nightly`')
+  })
 })
 
 describe('the action on a push', () => {

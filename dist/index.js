@@ -34564,10 +34564,12 @@ async function main() {
   const docs = docsCheckoutPath(runnerTemp());
   removeDocsCheckout(docs);
   try {
-    cloneDocsRepository({ docs, repository: inputs.docsRepository, branch: inputs.branch, token: inputs.docsToken, server: serverUrl() });
-    setCommitIdentity(docs, await botIdentity(inputs.docsToken));
-    setCredential(source, inputs.githubToken);
-    setCredential(docs, inputs.docsToken);
+    if (mode.kind !== "skipped") {
+      cloneDocsRepository({ docs, repository: inputs.docsRepository, branch: inputs.branch, token: inputs.docsToken, server: serverUrl() });
+      setCommitIdentity(docs, await botIdentity(inputs.docsToken));
+      setCredential(source, inputs.githubToken);
+      setCredential(docs, inputs.docsToken);
+    }
     const result = publish(
       {
         source,
