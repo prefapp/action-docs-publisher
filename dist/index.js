@@ -32892,6 +32892,13 @@ function planPrune({ docs, source, root, repository, entries }) {
     const other = mode === "mirror" ? releaseAreas : mirrorAreas;
     return other.has(areaDir) ? { kind: "mode-change", reason: `its entry is now in ${mode === "mirror" ? "release" : "mirror"} mode` } : { kind: "area-gone", reason: "its entry is gone from docs_publisher.yaml" };
   };
+  const retiredAreas = /* @__PURE__ */ new Set();
+  const retireTopFiles = (areaDir) => {
+    retiredAreas.add(areaDir);
+    for (const child of fs5.readdirSync(path4.join(docs, areaDir), { withFileTypes: true })) {
+      if (child.isFile()) files.push({ rel: `${areaDir}/${child.name}`, areaDir });
+    }
+  };
   for (const mirror of mirrors) {
     if (!ownedDirs.has(mirror.dir)) continue;
     if (!mirrorAreas.has(mirror.dir)) removals.push({ dir: mirror.dir, areaDir: mirror.areaDir, ...areaRemoval(mirror.dir, "mirror") });
@@ -32915,9 +32922,7 @@ function planPrune({ docs, source, root, repository, entries }) {
       const named = inArea.some((version) => version.packageDir);
       const dirs = named ? [...new Set(inArea.map((version) => version.packageDir).filter(Boolean))] : [...inArea.map((version) => version.dir), `${areaDir}/latest`];
       for (const dir of dirs) removals.push({ dir, areaDir, ...removal });
-      for (const child of fs5.readdirSync(path4.join(docs, areaDir), { withFileTypes: true })) {
-        if (child.isFile()) files.push({ rel: `${areaDir}/${child.name}`, areaDir });
-      }
+      retireTopFiles(areaDir);
       continue;
     }
     if (entry.packages === void 0) continue;
@@ -32934,6 +32939,7 @@ function planPrune({ docs, source, root, repository, entries }) {
     const entry = releaseAreas.get(areaDir);
     if (entry?.publishSourceBranch !== true) {
       removals.push({ dir: branch.dir, areaDir, ...entry ? { kind: "branch-off", reason: "its entry no longer publishes the source branch" } : areaRemoval(areaDir, "release") });
+      if (!entry && !retiredAreas.has(areaDir)) retireTopFiles(areaDir);
       continue;
     }
     if (name !== null && entry.packages !== void 0 && packageFolderGone(source, entry, name, checked)) {

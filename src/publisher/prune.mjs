@@ -102,6 +102,15 @@ export function planPrune({ docs, source, root, repository, entries }) {
       ? { kind: 'mode-change', reason: `its entry is now in ${mode === 'mirror' ? 'release' : 'mirror'} mode` }
       : { kind: 'area-gone', reason: 'its entry is gone from docs_publisher.yaml' }
   }
+  // The publisher owns every file at the top of a release Area; other folders are not its. An Area is retired once,
+  // whatever proves its ownership: Version folders or Branch Version folders.
+  const retiredAreas = new Set()
+  const retireTopFiles = (areaDir) => {
+    retiredAreas.add(areaDir)
+    for (const child of fs.readdirSync(path.join(docs, areaDir), { withFileTypes: true })) {
+      if (child.isFile()) files.push({ rel: `${areaDir}/${child.name}`, areaDir })
+    }
+  }
 
   for (const mirror of mirrors) {
     if (!ownedDirs.has(mirror.dir)) continue
@@ -128,10 +137,7 @@ export function planPrune({ docs, source, root, repository, entries }) {
       const named = inArea.some((version) => version.packageDir)
       const dirs = named ? [...new Set(inArea.map((version) => version.packageDir).filter(Boolean))] : [...inArea.map((version) => version.dir), `${areaDir}/latest`]
       for (const dir of dirs) removals.push({ dir, areaDir, ...removal })
-      // The publisher owns every file at the top of a release Area; other folders are not its.
-      for (const child of fs.readdirSync(path.join(docs, areaDir), { withFileTypes: true })) {
-        if (child.isFile()) files.push({ rel: `${areaDir}/${child.name}`, areaDir })
-      }
+      retireTopFiles(areaDir)
       continue
     }
     if (entry.packages === undefined) continue
@@ -154,6 +160,9 @@ export function planPrune({ docs, source, root, repository, entries }) {
       removals.push({ dir: branch.dir, areaDir, ...(entry
         ? { kind: 'branch-off', reason: 'its entry no longer publishes the source branch' }
         : areaRemoval(areaDir, 'release')) })
+      // With no entry, the branch markers are the only proof of ownership the Area has, so its top-level files go
+      // with the folder. Left behind, they would keep the Area from being switched to mirror mode.
+      if (!entry && !retiredAreas.has(areaDir)) retireTopFiles(areaDir)
       continue
     }
     if (name !== null && entry.packages !== undefined && packageFolderGone(source, entry, name, checked)) {

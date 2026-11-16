@@ -15,6 +15,7 @@ import {
   makeDocsRemote,
   makeSource,
   meta,
+  mirrorEntry,
   packageFiles,
   readFile,
   readJson,
@@ -239,6 +240,50 @@ describe('a release entry that publishes its source branch', () => {
 
     expect(run.status).toBe(0)
     expect(readTree(readRemote(world), `${CRDS_AREA}/main`)).toEqual(tree)
+  })
+})
+
+describe('an Area whose only folders are Branch Version folders', () => {
+  // A release entry publishes the Branch Version folder before its first tag, so an Area can hold the folder and its
+  // shared files with no Version folder to establish ownership from.
+  function branchOnly(source, files = {}) {
+    commitSource(source, { 'index.yaml': CRDS, 'docs/a.md': '# a', ...entriesFile([unnamedReleaseEntry({ publishSourceBranch: true })]), ...files }, 'publish the branch')
+    seedDocs(world, {
+      [`${CRDS_AREA}/main/.meta.json`]: branchMeta(source, 'core/crds'),
+      [`${CRDS_AREA}/main/index.yaml`]: CRDS,
+      [`${CRDS_AREA}/README.md`]: '# CRDS\n',
+      [`${CRDS_AREA}/index.json`]: '[]\n',
+    })
+    return source
+  }
+
+  test('retires its top-level files when its entry is gone', () => {
+    const source = branchOnly(makeSource(world))
+    commitSource(source, entriesFile([]), 'drop the crds entry')
+
+    const run = runReconcile(world, source)
+
+    expect(run.status).toBe(0)
+    const landed = readRemote(world)
+    expect(exists(landed, `${CRDS_AREA}/main`)).toBe(false)
+    expect(exists(landed, `${CRDS_AREA}/README.md`)).toBe(false)
+    expect(exists(landed, `${CRDS_AREA}/index.json`)).toBe(false)
+    expect(exists(landed, CRDS_AREA)).toBe(false)
+  })
+
+  test('leaves nothing behind to block a switch of the Area to mirror mode', () => {
+    const source = branchOnly(makeSource(world))
+    commitSource(source, entriesFile([mirrorEntry({ area: 'core/crds' })]), 'now a mirror')
+
+    const run = runReconcile(world, source)
+
+    expect(run.status).toBe(0)
+    const landed = readRemote(world)
+    expect(readFile(landed, `${CRDS_AREA}/a.md`)).toBe('# a')
+    expect(exists(landed, `${CRDS_AREA}/main`)).toBe(false)
+    expect(exists(landed, `${CRDS_AREA}/README.md`)).toBe(false)
+    expect(exists(landed, `${CRDS_AREA}/index.json`)).toBe(false)
+    expect(run.summary).toContain('its entry is now in mirror mode')
   })
 })
 
