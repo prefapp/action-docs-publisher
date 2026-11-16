@@ -33135,7 +33135,8 @@ function planSharedArea({ docs, root, entry, repository, branch, sourceBranch, d
   const removals = [];
   const rows = [];
   const warnings = [];
-  const url = (...segments) => `https://raw.githubusercontent.com/${docsRepository}/${branch}/${urlPath([
+  const url = (...segments) => `https://raw.githubusercontent.com/${docsRepository}/${urlPath([
+    branch,
     path5.posix.join(root, ...segments.filter(Boolean))
   ])}`;
   for (const [name, group] of [...groups].sort(([a], [b]) => (a ?? "").localeCompare(b ?? ""))) {

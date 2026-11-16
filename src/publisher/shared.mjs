@@ -189,9 +189,10 @@ export function planSharedArea({ docs, root, entry, repository, branch, sourceBr
   const removals = []
   const rows = []
   const warnings = []
-  // `name` is null for an unnamed release entry; join() would reject it, and the URL has no such segment.
-  const url = (...segments) => `https://raw.githubusercontent.com/${docsRepository}/${branch}/${urlPath([
-    path.posix.join(root, ...segments.filter(Boolean)),
+  // `name` is null for an unnamed release entry; join() would reject it, and the URL has no such segment. The branch
+  // is encoded like the path: a name git accepts may hold `#` or `%`, which a URL reads as a fragment or an escape.
+  const url = (...segments) => `https://raw.githubusercontent.com/${docsRepository}/${urlPath([
+    branch, path.posix.join(root, ...segments.filter(Boolean)),
   ])}`
   for (const [name, group] of [...groups].sort(([a], [b]) => (a ?? '').localeCompare(b ?? ''))) {
     const sorted = [...group.values()].sort((a, b) => compareSemver(b.version, a.version) || a.version.localeCompare(b.version))

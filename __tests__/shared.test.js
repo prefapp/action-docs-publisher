@@ -137,6 +137,17 @@ describe('release shared files', () => {
     ] }] })
   })
 
+  test('encodes a docs branch name that URLs would read as a fragment or an escape', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    const docs = cloneDocs(world)
+    git(docs, 'push', 'origin', 'main:docs/preview#50%')
+    const run = runPublisher(docs, { source, tag: 'alpha-v1.0.0', branch: 'docs/preview#50%' })
+    expect(run.status).toBe(0)
+    expect(readJson(docs, 'site/raw/features/alpha/versions.json')[0].url)
+      .toBe('https://raw.githubusercontent.com/firestartr-pro/docs/docs/preview%2350%25/site/raw/features/alpha/1.0.0/schema.json')
+  })
+
   test('writes Version metadata, versions.json and the hub-shaped index in one commit', () => {
     const source = makeSource(world)
     const entry = releaseEntry({ collect: [{ from: 'templates/docs/**', to: '.' }, { from: 'CHANGELOG.md', to: 'CHANGELOG.md' }, { from: 'schema.json', to: 'schema.json' }] })
