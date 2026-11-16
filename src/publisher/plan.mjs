@@ -114,6 +114,63 @@ function recordReleaseChanges({ args, areas, report, add }) {
   }
 }
 
+// The names a rebuild generates at the top of an Area. Every other file there is an Area file of the entry.
+const GENERATED_AREA_NAMES = new Set(['index.json', 'versions.json', 'latest', '.meta.json'])
+
+// What the Area's shared files would gain, lose or overwrite, read off the bytes the rebuild plans for them: the plan
+// writes nothing, so it compares them with the docs repo instead of staging them.
+function sharedFileChanges({ docs, areaDir, plan }) {
+  const areaFiles = []
+  const generated = []
+  const record = (rel, verb) => {
+    const label = path.posix.dirname(rel) === areaDir && !GENERATED_AREA_NAMES.has(path.posix.basename(rel))
+      ? 'Area file'
+      : 'shared file'
+    const line = `- ${verb} ${label} \`${rel.slice(areaDir.length + 1)}\`.`
+    if (label === 'Area file') areaFiles.push(line)
+    else generated.push(line)
+  }
+  for (const [rel, file] of plan.files) {
+    const absolute = path.join(docs, rel)
+    const stat = lstatOrNull(absolute)
+    const wanted = Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content)
+    if (!stat) record(rel, 'Add')
+    else if (!stat.isFile() || Buffer.compare(fs.readFileSync(absolute), wanted) !== 0) record(rel, 'Replace')
+  }
+  const written = new Set(plan.files.keys())
+  for (const rel of plan.removals) {
+    const absolute = path.join(docs, rel)
+    const stat = lstatOrNull(absolute)
+    if (!stat || written.has(rel)) continue
+    // A rebuild clears the Latest copy through its package folder and writes it back: of a folder that holds one of
+    // those writes, only the files it does not write again are gone.
+    const rewritten = [...written].some((file) => file.startsWith(`${rel}/`))
+    if (!stat.isDirectory() || !rewritten) {
+      record(rel, 'Delete')
+      continue
+    }
+    for (const child of fs.readdirSync(absolute, { recursive: true }).sort()) {
+      const childRel = path.posix.join(rel, child.split(path.sep).join('/'))
+      if (!written.has(childRel) && !lstatOrNull(path.join(docs, childRel)).isDirectory()) record(childRel, 'Delete')
+    }
+  }
+  return { areaFiles, generated }
+}
+
+// The Area files an entry lists are always planned: they are content the merge adds or overwrites. The indexes a
+// publish regenerates are planned only for an Area with no line of its own, so a Version publish is not restated
+// four times by the files that follow it.
+function recordSharedChanges({ docs, shared, changes, add }) {
+  let planned = false
+  for (const { areaDir, ...plan } of shared) {
+    const { areaFiles, generated } = sharedFileChanges({ docs, areaDir, plan })
+    const lines = changes.has(areaDir) || areaFiles.length > 0 ? areaFiles : generated
+    for (const line of lines) add(areaDir, line)
+    if (lines.length > 0) planned = true
+  }
+  return planned
+}
+
 function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
   assertNoSymlinkPath(args.docs, root)
   const observed = scan(args.docs, root)
@@ -144,12 +201,13 @@ function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
   const plannedFiles = new Map(reconcile.files)
   for (const mirror of writable) for (const [rel, file] of mirror.files) put(plannedFiles, rel, file)
   recordReleaseChanges({ args, areas, report: reconcile.report, add })
-  const { problems } = planReconcileSharedAreas({
+  const { shared, problems } = planReconcileSharedAreas({
     args: { ...args, docs: snapshot }, repository, root, areas, reconcile,
     checkPlacement: (area) => assertAreaPlacement(snapshot, area.areaDir, root, 'release', plannedFiles),
   })
   if (problems.length) throw new FatalError([...new Set(problems)].join('\n'))
-  return prune.hasWork || reconcile.report.published.length > 0 || reconcile.report.republished.length > 0
+  return recordSharedChanges({ docs: args.docs, shared, changes, add })
+    || prune.hasWork || reconcile.report.published.length > 0 || reconcile.report.republished.length > 0
     || reconcile.report.branches.some((branch) => branch.changed)
     || mirrors.some((mirror) => !lstatOrNull(path.join(args.docs, mirror.areaDir)))
 }

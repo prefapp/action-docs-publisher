@@ -225,6 +225,92 @@ describe('pull request plans', () => {
     expect(run.summary).not.toContain('Skipped plan:')
   })
 
+  test('lists the Area file a new areaFiles rule would copy into a published Area', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    expect(runPublisher(cloneDocs(world), { source, tag: 'alpha-v1.0.0' }).status).toBe(0)
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, {
+      'REHEARSAL-PLAN.md': '# Rehearsal plan\n',
+      ...entriesFile([releaseEntry({ areaFiles: [{ from: 'README.md', to: 'README.md' }, { from: 'REHEARSAL-PLAN.md', to: 'REHEARSAL-PLAN.md' }] })]),
+    })
+
+    const run = plan(source, before)
+
+    expect(run.status).toBe(0)
+    expect(run.body).toContain('### `features`\n- Add Area file `REHEARSAL-PLAN.md`.')
+    expect(run.body).not.toContain('No changes to add, republish, delete or replace.')
+    expect(run.body).not.toContain('would fail to publish')
+  })
+
+  test('lists no shared file for a plan that only publishes a Version', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    expect(runPublisher(cloneDocs(world), { source, tag: 'alpha-v1.0.0' }).status).toBe(0)
+    const before = git(source, 'rev-parse', 'HEAD')
+    releaseCommit(source, { ...featureFiles('alpha'), 'packages/alpha/templates/docs/intro.md': '# alpha 1.1\n', ...entriesFile([releaseEntry()]) }, 'alpha-v1.1.0', DATE)
+
+    const run = plan(source, before)
+
+    expect(run.status).toBe(0)
+    expect(run.body).toContain('- Add version `alpha/1.1.0`.')
+    expect(run.body).not.toContain('shared file')
+    expect(run.body).not.toContain('Area file')
+  })
+
+  test('lists a stale shared file when nothing else in the Area changes', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    expect(runPublisher(cloneDocs(world), { source, tag: 'alpha-v1.0.0' }).status).toBe(0)
+    seedDocs(world, { 'site/raw/features/index.json': '{"hand":"edited"}\n' })
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'packages/alpha/schema.json': '{"head":true}' })
+
+    const run = plan(source, before)
+
+    expect(run.status).toBe(0)
+    expect(run.body).toContain('### `features`\n- Replace shared file `index.json`.')
+    expect(run.body).not.toContain('No changes to add, republish, delete or replace.')
+  })
+
+  test('lists a stale file in the Latest copy that the rebuild deletes and does not write back', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    expect(runPublisher(cloneDocs(world), { source, tag: 'alpha-v1.0.0' }).status).toBe(0)
+    seedDocs(world, { 'site/raw/features/alpha/images/obsolete.png': 'stale\n' })
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'packages/alpha/schema.json': '{"head":true}' })
+
+    const run = plan(source, before)
+
+    expect(run.status).toBe(0)
+    expect(run.body).toContain('### `features`\n- Delete shared file `alpha/images/obsolete.png`.')
+    expect(run.body).not.toContain('logo.png')
+    expect(run.body).not.toContain('No changes to add, republish, delete or replace.')
+  })
+
+  test('plans the Area files a changed entry would replace and delete', () => {
+    const source = makeSource(world)
+    releaseCommit(source, {
+      ...featureFiles('alpha'),
+      'NOTES.md': '# Notes\n',
+      ...entriesFile([releaseEntry({ areaFiles: [{ from: 'README.md', to: 'README.md' }, { from: 'NOTES.md', to: 'NOTES.md' }] })]),
+    }, 'alpha-v1.0.0', DATE)
+    expect(runPublisher(cloneDocs(world), { source, tag: 'alpha-v1.0.0' }).status).toBe(0)
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, {
+      'NOTES.md': '# Notes\n',
+      ...entriesFile([releaseEntry({ areaFiles: [{ from: 'NOTES.md', to: 'NOTES.md' }] })]),
+    })
+
+    const run = plan(source, before)
+
+    expect(run.status).toBe(0)
+    expect(run.body).toContain('- Delete Area file `README.md`.')
+    expect(run.body).not.toContain('shared file')
+    expect(run.body).not.toContain('would fail to publish')
+  })
+
   test('plans package changes from the merge base when the base is not an ancestor of the PR head', () => {
     const source = makeSource(world)
     releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
@@ -278,7 +364,18 @@ describe('pull request plans', () => {
     expect(run.body).not.toContain('build failed')
   })
 
-  test('still says nothing changes when every candidate version is skipped', () => {
+  test('says nothing changes when every candidate version is skipped and the Area has no Area file', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([]), 'packages/alpha/schema.json': null }, 'alpha-v0.1.0', DATE)
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, entriesFile([releaseEntry({ areaFiles: [] })]))
+    const run = plan(source, before)
+    expect(run.status).toBe(0)
+    expect(run.body).toContain('- Skipped `alpha-v0.1.0`: its content does not fit the entry (not found: schema.json).')
+    expect(run.body).toContain('No changes to add, republish, delete or replace.')
+  })
+
+  test('plans the Area file the merge would add even when every candidate version is skipped', () => {
     const source = makeSource(world)
     releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([]), 'packages/alpha/schema.json': null }, 'alpha-v0.1.0', DATE)
     const before = git(source, 'rev-parse', 'HEAD')
@@ -286,7 +383,8 @@ describe('pull request plans', () => {
     const run = plan(source, before)
     expect(run.status).toBe(0)
     expect(run.body).toContain('- Skipped `alpha-v0.1.0`: its content does not fit the entry (not found: schema.json).')
-    expect(run.body).toContain('No changes to add, republish, delete or replace.')
+    expect(run.body).toContain('- Add Area file `README.md`.')
+    expect(run.body).not.toContain('No changes to add, republish, delete or replace.')
   })
 
   test('lists an unfit old tag as skipped with the reconcile reason', () => {

@@ -34019,17 +34019,20 @@ function planReconcileSharedAreas({ args, repository, root, areas, reconcile, ch
   for (const [index, area] of areas.entries()) {
     try {
       checkPlacement?.(area);
-      shared.push(planSharedArea({
-        docs: args.docs,
-        root,
-        entry: area.entry,
-        repository,
-        branch: args.branch,
-        sourceBranch: args["source-branch"],
-        docsRepository: args["docs-repository"],
-        versions: reconcile.areas[index].versions,
-        areaFiles: new Map([...reconcile.files].filter(([rel]) => path9.posix.dirname(rel) === area.areaDir))
-      }));
+      shared.push({
+        areaDir: area.areaDir,
+        ...planSharedArea({
+          docs: args.docs,
+          root,
+          entry: area.entry,
+          repository,
+          branch: args.branch,
+          sourceBranch: args["source-branch"],
+          docsRepository: args["docs-repository"],
+          versions: reconcile.areas[index].versions,
+          areaFiles: new Map([...reconcile.files].filter(([rel]) => path9.posix.dirname(rel) === area.areaDir))
+        })
+      });
     } catch (error2) {
       if (!(error2 instanceof FatalError)) throw error2;
       problems.push(error2.message);
@@ -34235,6 +34238,50 @@ function recordReleaseChanges({ args, areas, report, add }) {
     })) add(area.areaDir, line);
   }
 }
+var GENERATED_AREA_NAMES = /* @__PURE__ */ new Set(["index.json", "versions.json", "latest", ".meta.json"]);
+function sharedFileChanges({ docs, areaDir, plan }) {
+  const areaFiles = [];
+  const generated = [];
+  const record = (rel, verb) => {
+    const label = path10.posix.dirname(rel) === areaDir && !GENERATED_AREA_NAMES.has(path10.posix.basename(rel)) ? "Area file" : "shared file";
+    const line = `- ${verb} ${label} \`${rel.slice(areaDir.length + 1)}\`.`;
+    if (label === "Area file") areaFiles.push(line);
+    else generated.push(line);
+  };
+  for (const [rel, file] of plan.files) {
+    const absolute = path10.join(docs, rel);
+    const stat2 = lstatOrNull(absolute);
+    const wanted = Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content);
+    if (!stat2) record(rel, "Add");
+    else if (!stat2.isFile() || Buffer.compare(fs10.readFileSync(absolute), wanted) !== 0) record(rel, "Replace");
+  }
+  const written = new Set(plan.files.keys());
+  for (const rel of plan.removals) {
+    const absolute = path10.join(docs, rel);
+    const stat2 = lstatOrNull(absolute);
+    if (!stat2 || written.has(rel)) continue;
+    const rewritten = [...written].some((file) => file.startsWith(`${rel}/`));
+    if (!stat2.isDirectory() || !rewritten) {
+      record(rel, "Delete");
+      continue;
+    }
+    for (const child of fs10.readdirSync(absolute, { recursive: true }).sort()) {
+      const childRel = path10.posix.join(rel, child.split(path10.sep).join("/"));
+      if (!written.has(childRel) && !lstatOrNull(path10.join(docs, childRel)).isDirectory()) record(childRel, "Delete");
+    }
+  }
+  return { areaFiles, generated };
+}
+function recordSharedChanges({ docs, shared, changes, add }) {
+  let planned = false;
+  for (const { areaDir, ...plan } of shared) {
+    const { areaFiles, generated } = sharedFileChanges({ docs, areaDir, plan });
+    const lines = changes.has(areaDir) || areaFiles.length > 0 ? areaFiles : generated;
+    for (const line of lines) add(areaDir, line);
+    if (lines.length > 0) planned = true;
+  }
+  return planned;
+}
 function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
   assertNoSymlinkPath(args.docs, root);
   const observed = scan(args.docs, root);
@@ -34267,7 +34314,7 @@ function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
   const plannedFiles = new Map(reconcile.files);
   for (const mirror of writable) for (const [rel, file] of mirror.files) put(plannedFiles, rel, file);
   recordReleaseChanges({ args, areas, report: reconcile.report, add });
-  const { problems } = planReconcileSharedAreas({
+  const { shared, problems } = planReconcileSharedAreas({
     args: { ...args, docs: snapshot },
     repository,
     root,
@@ -34276,7 +34323,7 @@ function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
     checkPlacement: (area) => assertAreaPlacement(snapshot, area.areaDir, root, "release", plannedFiles)
   });
   if (problems.length) throw new FatalError([...new Set(problems)].join("\n"));
-  return prune.hasWork || reconcile.report.published.length > 0 || reconcile.report.republished.length > 0 || reconcile.report.branches.some((branch) => branch.changed) || mirrors.some((mirror) => !lstatOrNull(path10.join(args.docs, mirror.areaDir)));
+  return recordSharedChanges({ docs: args.docs, shared, changes, add }) || prune.hasWork || reconcile.report.published.length > 0 || reconcile.report.republished.length > 0 || reconcile.report.branches.some((branch) => branch.changed) || mirrors.some((mirror) => !lstatOrNull(path10.join(args.docs, mirror.areaDir)));
 }
 function planReconcile({ args, repository, root }) {
   const scope = docsRoot(root);

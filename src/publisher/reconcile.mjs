@@ -296,12 +296,15 @@ export function planReconcileSharedAreas({ args, repository, root, areas, reconc
   for (const [index, area] of areas.entries()) {
     try {
       checkPlacement?.(area)
-      shared.push(planSharedArea({
-        docs: args.docs, root, entry: area.entry, repository, branch: args.branch,
-        sourceBranch: args['source-branch'],
-        docsRepository: args['docs-repository'], versions: reconcile.areas[index].versions,
-        areaFiles: new Map([...reconcile.files].filter(([rel]) => path.posix.dirname(rel) === area.areaDir)),
-      }))
+      shared.push({
+        areaDir: area.areaDir,
+        ...planSharedArea({
+          docs: args.docs, root, entry: area.entry, repository, branch: args.branch,
+          sourceBranch: args['source-branch'],
+          docsRepository: args['docs-repository'], versions: reconcile.areas[index].versions,
+          areaFiles: new Map([...reconcile.files].filter(([rel]) => path.posix.dirname(rel) === area.areaDir)),
+        }),
+      })
     } catch (error) {
       if (!(error instanceof FatalError)) throw error
       problems.push(error.message)
