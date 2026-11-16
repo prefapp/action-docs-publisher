@@ -152,6 +152,44 @@ describe('a Branch Version folder a run replaces', () => {
     expect(remoteCommitCount(world)).toBe(commits)
   })
 
+  // A push with no Area files plans no shared files, and that plan is what usually proves where the Area sits. The
+  // Branch Version folder is written into the same folder whether or not it is planned, so its parent is checked too.
+  test('a push with no Area files refuses a Branch Version folder inside a Mirror Area', () => {
+    const source = crdsSource({ areaFiles: [] })
+    seedDocs(world, {
+      'site/raw/core/.meta.json': meta({ source: 'other/producer', sourceRevision: 'a'.repeat(40), sourceBranch: 'main', date: DATE }),
+      'site/raw/core/keep.md': 'FOREIGN MIRROR\n',
+    })
+    const commits = remoteCommitCount(world)
+
+    const run = push(source)
+
+    expect(run.status).toBe(2)
+    expect(run.summary).toContain(`refusing to publish ${CRDS_AREA}: it sits inside a mirror Area at site/raw/core`)
+    expect(exists(readRemote(world), `${CRDS_AREA}/main`)).toBe(false)
+    expect(readFile(readRemote(world), 'site/raw/core/keep.md')).toBe('FOREIGN MIRROR\n')
+    expect(remoteCommitCount(world)).toBe(commits)
+  })
+
+  test('a push with no Area files refuses a Branch Version folder inside a Version folder', () => {
+    const area = 'core/crds/v1.2.0/nested'
+    const source = crdsSource({ area, areaFiles: [] })
+    const versionDir = 'site/raw/core/crds/v1.2.0'
+    seedDocs(world, {
+      [`${versionDir}/.meta.json`]: meta({ source: 'other/producer', tag: 'v1.2.0', date: DATE }),
+      [`${versionDir}/keep.md`]: 'FOREIGN VERSION\n',
+    })
+    const commits = remoteCommitCount(world)
+
+    const run = push(source)
+
+    expect(run.status).toBe(2)
+    expect(run.summary).toContain(`refusing to publish site/raw/${area}: it sits inside a Version folder at ${versionDir}`)
+    expect(exists(readRemote(world), `site/raw/${area}/main`)).toBe(false)
+    expect(readFile(readRemote(world), `${versionDir}/keep.md`)).toBe('FOREIGN VERSION\n')
+    expect(remoteCommitCount(world)).toBe(commits)
+  })
+
   test('a reconcile refuses to replace a Branch Version folder another repo owns', () => {
     const source = crdsSource()
     const foreign = meta({ source: 'other/producer', area: 'core/crds', branch: 'main', sourceRevision: 'a'.repeat(40), date: DATE })

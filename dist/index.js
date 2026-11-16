@@ -33825,11 +33825,14 @@ function planPushAttempt({ args, repository, root, mirrors, sourceRevision, area
   }
   const writable = planMirrorWrites({ args, repository, mirrors });
   assertRecordOwners(scan(args.docs, root).records, areaFileSources.map((source) => source.areaDir), root, repository);
-  for (const { area, branches } of shared) {
+  for (const { area, areaDir, branches } of shared) {
     for (const branch of branches) {
       assertBranchReplaceable(args.docs, root, branch.dir, area, repository);
       assertAreaWritable(args.docs, branch.dir, /* @__PURE__ */ new Set(), [branch.dir]);
     }
+    if (branches.length === 0) continue;
+    const placement = placementProblems(args.docs, root, areaDir, branches.map((branch) => ({ versionDir: branch.dir })));
+    if (placement.length > 0) throw new FatalError([...new Set(placement)].join("\n"));
   }
   return {
     shared,

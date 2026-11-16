@@ -37,7 +37,7 @@ import {
 import { classifyStagedEffects, publishWithRetry, sourceBranchMoved, syncToBranch } from './push.mjs'
 import { planBranchVersions, rebuildPackages } from './release.mjs'
 import { scan } from './prune.mjs'
-import { planSharedArea, snapshotAreaState, writeSharedArea } from './shared.mjs'
+import { placementProblems, planSharedArea, snapshotAreaState, writeSharedArea } from './shared.mjs'
 
 export function pushChangedFiles(source, before, after) {
   if (!before || !isAncestor(source, before, after)) return null
@@ -264,12 +264,17 @@ function planPushAttempt({ args, repository, root, mirrors, sourceRevision, area
   // A Branch Version folder is replaced whole once the plan is written, so the run checks it while planning, outside the
   // per-Area containment: a symlinked parent folder would otherwise be emptied before the write guard refused it, and a
   // folder another repo owns would be replaced. A folder with no marker of its own is hand-made too, and the replacement
-  // would delete its files: the same guard the Area gets covers it.
-  for (const { area, branches } of shared) {
+  // would delete its files: the same guard the Area gets covers it. The folder is written into its parent whether or not
+  // the Area's shared files are planned, so the check `planSharedArea` runs for the Area and its Version folders runs
+  // for the Branch Version folders too, with each folder's own parent in place of a planned Version's.
+  for (const { area, areaDir, branches } of shared) {
     for (const branch of branches) {
       assertBranchReplaceable(args.docs, root, branch.dir, area, repository)
       assertAreaWritable(args.docs, branch.dir, new Set(), [branch.dir])
     }
+    if (branches.length === 0) continue
+    const placement = placementProblems(args.docs, root, areaDir, branches.map((branch) => ({ versionDir: branch.dir })))
+    if (placement.length > 0) throw new FatalError([...new Set(placement)].join('\n'))
   }
   return {
     shared,

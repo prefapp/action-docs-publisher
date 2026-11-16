@@ -88,7 +88,10 @@ function clearProblems(docs, root, rel, areaDir, problems) {
   }
 }
 
-function placementProblems(docs, root, areaDir, versions) {
+// The placement a folder needs: no marker above it, no Mirror Area below it, and, for each planned Version folder,
+// no marker at its parent. `planSharedArea` runs it for the Area, and a Branch Version folder's parent needs the
+// same answer whether or not the Area's shared files are rebuilt.
+export function placementProblems(docs, root, areaDir, versions) {
   const problems = []
   const read = (dir) => {
     try { return markerRecordAt(docs, root, dir) } catch (error) {
