@@ -63,9 +63,11 @@ function planRemovals({ args, prune, observed, add }) {
 }
 
 // The paths the mirror's collect rules would write, which the hand-made Area guard must see as planned: the plan
-// writes no bytes, but it must agree with the run about whether the folder is refused. A rule the build would satisfy
-// cannot be expanded here, so that Area's destinations stay unknown and the plan makes no refusal claim for it.
+// writes no bytes, but it must agree with the run about whether the folder is refused. A build's files cannot be named
+// here, because a build does not run in plan mode, so a build-backed Area's destinations stay unknown and the plan
+// makes no refusal claim for it. A rule that cannot be expanded at all leaves them unknown in the same way.
 function mirrorDestinations({ args, areaDir, entry }) {
+  if (entry.build !== undefined) return null
   const destinations = new Set([`${areaDir}/.meta.json`])
   for (const rule of entry.collect) {
     try {

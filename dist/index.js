@@ -34240,6 +34240,7 @@ function planRemovals({ args, prune, observed, add }) {
   return changedAreas;
 }
 function mirrorDestinations({ args, areaDir, entry }) {
+  if (entry.build !== void 0) return null;
   const destinations = /* @__PURE__ */ new Set([`${areaDir}/.meta.json`]);
   for (const rule of entry.collect) {
     try {

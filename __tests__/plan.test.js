@@ -365,6 +365,31 @@ describe('pull request plans', () => {
     expect(run.body).toContain('Mirror content changes are not listed; mirror builds do not run in plan mode.')
   })
 
+  test('lists no deletion for the mirror files only its build writes', () => {
+    const source = makeSource(world)
+    // The build writes docs/generated/schema.json, and no glob matches it before the build runs.
+    const build = "mkdir -p docs/generated && printf '{}' > docs/generated/schema.json"
+    commitSource(source, { 'docs/index.md': '# Docs\n', ...entriesFile([]) })
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, entriesFile([mirrorEntry({ build })]))
+    seedDocs(world, {
+      'site/raw/core/docs/index.md': '# Docs\n',
+      'site/raw/core/docs/generated/schema.json': '{}',
+    })
+
+    const run = plan(source, before)
+
+    expect(run.status).toBe(0)
+    expect(run.body).not.toContain('would fail to publish')
+    expect(run.body).toContain('Mirror content changes are not listed; mirror builds do not run in plan mode.')
+    // The run rewrites every file of the folder, so it does not refuse the folder the plan called unmarked either.
+    const reconcile = runPublisher(cloneDocs(world, 'build-mirror-docs'), {
+      source: cloneSource(world, source, 'build-mirror-source'), reconcile: true,
+    })
+    expect(reconcile.status).toBe(0)
+    expect(readFile(readRemote(world), 'site/raw/core/docs/generated/schema.json')).toBe('{}')
+  })
+
   test('reports a release Area nested in a Mirror Area as a configuration error without running the mirror build', () => {
     const source = makeSource(world)
     commitSource(source, { ...featureFiles('alpha'), ...entriesFile([]), 'docs/index.md': '# docs' })
