@@ -259,6 +259,21 @@ describe('pull request plans', () => {
     expect(run.body).not.toContain('would fail to publish')
   })
 
+  test('lists a named Area areaFile named latest as an Area file, not a generated one', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    expect(runPublisher(cloneDocs(world), { source, tag: 'alpha-v1.0.0' }).status).toBe(0)
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { ...entriesFile([releaseEntry({ areaFiles: [{ from: 'README.md', to: 'latest' }] })]) })
+
+    const run = plan(source, before)
+
+    expect(run.status).toBe(0)
+    expect(run.body).toContain('- Add Area file `latest`.')
+    expect(run.body).toContain('- Delete Area file `README.md`.')
+    expect(run.body).not.toContain('shared file `latest`')
+  })
+
   test('lists no shared file for a plan that only publishes a Version', () => {
     const source = makeSource(world)
     releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)

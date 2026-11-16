@@ -30,11 +30,12 @@ import {
   markerRecordAt,
   readMarkerRecord,
   runBuild,
+  staleAreaFilesSummary,
   writeFile,
   writeSummary,
 } from './files.mjs'
 import { classifyStagedEffects, publishWithRetry, sourceBranchMoved, syncToBranch } from './push.mjs'
-import { planBranchVersions, touchedPackages } from './release.mjs'
+import { planBranchVersions, rebuildPackages } from './release.mjs'
 import { scan } from './prune.mjs'
 import { planSharedArea, snapshotAreaState, writeSharedArea } from './shared.mjs'
 
@@ -198,29 +199,30 @@ export function mirrorSummary(mirrors, branch, changed) {
     : `Nothing to publish: the docs repo already holds the mirror entries (${areas}).`)
 }
 
-// A checkout behind the source branch tip leaves the Area files unpublished: it cannot tell which of them a newer
-// run already replaced.
-function staleAreaFilesSummary(areaDir, sourceBranch) {
-  writeSummary(`Skipped the Area files of \`${areaDir}\`: the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell whether newer ones are already published.`)
-}
-
 // One release Area's rebuild: its freshness snapshot, its plan for the Area's shared files, and the Branch Version
 // folders its entry publishes. A push contains a failure here to that Area, so the rest of the run still publishes.
-function planRebuild({ args, repository, root, source, sourceRevision }) {
+function planRebuild({ args, repository, root, source, sourceRevision, stale }) {
   const { entry } = source
   const areaFiles = readAreaFiles(args.source, source.areaDir, entry)
-  const fresh = areaIsFresh(args.docs, root, source)
+  // A checkout behind the branch tip holds files a newer run may already have replaced, and it cannot tell: it plans
+  // none of the Area's shared files. A Branch Version folder names the commit it was built from, so it needs no such
+  // doubt.
+  const fresh = !stale && areaIsFresh(args.docs, root, source)
   return {
     fresh,
-    // The branch tip moved, so the folder holds the build output of the packages this push touched.
+    // The tip moved, so each folder holds the build output of the packages this push changed, or of the package a
+    // superseded push left behind.
     branches: entry.publishSourceBranch === true ? planBranchVersions({
       source: args.source, root, entry, repository, branch: args['source-branch'], revision: sourceRevision,
-      names: touchedPackages({ source: args.source, entry, changed: source.changed }),
+      names: rebuildPackages({
+        source: args.source, docs: args.docs, root, entry, branch: args['source-branch'], changed: source.changed,
+        tip: !stale,
+      }),
     }) : [],
-    plan: entry.areaFiles.length === 0 ? null : planSharedArea({
+    plan: stale || entry.areaFiles.length === 0 ? null : planSharedArea({
       docs: args.docs, root, entry, repository, branch: args.branch,
       docsRepository: args['docs-repository'],
-      areaFiles: fresh ? areaFiles : keptAreaFiles(args.docs, areaFiles),
+      areaFiles: fresh ? areaFiles : keptAreaFiles(args.docs, source.areaDir, entry),
     }),
   }
 }
@@ -236,23 +238,22 @@ function areaIsFresh(docs, root, source) {
 // Everything one attempt writes, computed from the docs branch tip before anything is written. A part the push
 // cannot plan is dropped here instead of being undone after a write.
 function planPushAttempt({ args, repository, root, mirrors, sourceRevision, areaFileSources }) {
-  // Rebuild only from a source checkout that is still the branch tip: a retry after it moved would otherwise
-  // publish docs that a newer push already replaced. The next run, which starts from the tip, rebuilds them.
+  // A retry after the source branch moved cannot rebuild the Area's shared files: it cannot tell which of them a
+  // newer push already replaced. The Branch Versions stay planned, one folder at a time, because each marker names
+  // the commit its build came from.
   const stale = sourceBranchMoved(args.source, args['source-branch'])
   const problems = new Map()
   const staleAreaFiles = new Set()
   const shared = []
-  if (!stale) {
-    for (const source of areaFileSources) {
-      try {
-        const { fresh, plan, branches } = planRebuild({ args, repository, root, source, sourceRevision })
-        if (!fresh) staleAreaFiles.add(source.areaDir)
-        shared.push({ area: source.entry.area, areaDir: source.areaDir, plan, branches })
-      } catch (error) {
-        // One Area the push cannot rebuild keeps its docs: the run names the problem and publishes the rest.
-        if (!(error instanceof FatalError)) throw error
-        problems.set(source.areaDir, error.message.split('\n')[0])
-      }
+  for (const source of areaFileSources) {
+    try {
+      const { fresh, plan, branches } = planRebuild({ args, repository, root, source, sourceRevision, stale })
+      if (!stale && !fresh) staleAreaFiles.add(source.areaDir)
+      shared.push({ area: source.entry.area, areaDir: source.areaDir, plan, branches })
+    } catch (error) {
+      // One Area the push cannot rebuild keeps its docs: the run names the problem and publishes the rest.
+      if (!(error instanceof FatalError)) throw error
+      problems.set(source.areaDir, error.message.split('\n')[0])
     }
   }
   const writable = planMirrorWrites({ args, repository, mirrors })

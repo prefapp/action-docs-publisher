@@ -271,6 +271,15 @@ export function folderNames(dir) {
 
 export const metaFile = (fields) => ({ content: JSON.stringify(fields, null, 2) + '\n' })
 
+// The names a rebuild generates at the top of an Area. Every other file there is an Area file of the entry.
+export const GENERATED_AREA_NAMES = new Set(['index.json', 'versions.json', '.meta.json'])
+
+// `latest` is a generated name only where the rebuild writes the Latest folder: the top of an Area without
+// `packages`. Entry validation reserves the name there alone, so a named Area's `latest` is one of its Area files.
+export function generatedAreaNames(entry) {
+  return entry.packages === undefined ? new Set([...GENERATED_AREA_NAMES, 'latest']) : GENERATED_AREA_NAMES
+}
+
 export function readAreaFiles(source, areaDir, entry) {
   const files = new Map()
   for (const rule of entry.areaFiles) {
@@ -511,12 +520,19 @@ export function existingVersionFolders(docs, areaDir, entry) {
   return folders.sort((a, b) => a.dir.localeCompare(b.dir))
 }
 
-// The Area-file bytes the docs repo holds now: what an Area keeps when its Version metadata moved under a run,
-// since another run published newer ones and this one must not roll them back.
-export function keptAreaFiles(docs, areaFiles) {
+// The Area files the docs repo holds now: what an Area keeps when its Version metadata moved under a run, since
+// another run published newer ones and this one must not roll them back. A newer run may also have published a file
+// this entry no longer names, so the whole set comes from the docs branch, not from the destinations the entry lists.
+export function keptAreaFiles(docs, areaDir, entry) {
   const kept = new Map()
-  for (const rel of areaFiles.keys()) {
-    assertNoSymlinkPath(docs, rel)
+  const dir = path.join(docs, areaDir)
+  if (!lstatOrNull(dir)?.isDirectory()) return kept
+  // A generated name is the plan's to rewrite: keeping the docs copy would plan the same path twice. `latest` is one
+  // only where this entry's rebuild writes the Latest folder, and elsewhere it is an Area file worth keeping.
+  const generated = generatedAreaNames(entry)
+  for (const name of fs.readdirSync(dir).sort()) {
+    if (generated.has(name)) continue
+    const rel = path.posix.join(areaDir, name)
     if (lstatOrNull(path.join(docs, rel))?.isFile()) kept.set(rel, { content: fs.readFileSync(path.join(docs, rel)) })
   }
   return kept
@@ -524,6 +540,12 @@ export function keptAreaFiles(docs, areaFiles) {
 
 export function keptAreaFilesSummary(areaDir, run) {
   writeSummary(`Kept the Area files of \`${areaDir}\`: the Area's shared files changed since ${run} started.`)
+}
+
+// A checkout behind the source branch tip leaves the Area files unpublished: it cannot tell which of them a newer
+// run already replaced.
+export function staleAreaFilesSummary(areaDir, sourceBranch) {
+  writeSummary(`Skipped the Area files of \`${areaDir}\`: the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell whether newer ones are already published.`)
 }
 
 // A push publishes the rest even when one Area cannot be rebuilt, so it names the problem and leaves the repair to a run.

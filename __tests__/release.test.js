@@ -149,6 +149,79 @@ describe('release selection and collection', () => {
     )
   }, 20000)
 
+  test('keeps newer Area files a push published before a release from a checkout behind the tip', () => {
+    const source = sourceWith(releaseEntry(), TAG, { 'README.md': '# v1 readme\n' })
+    // The release checkout holds the tag but not the newer commit the push publishes from.
+    const releaseCheckout = cloneSource(world, source, 'release-checkout-behind')
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'README.md': '# v2 readme\n' }, 'newer area files')
+    const pushed = runPublisher(cloneDocs(world, 'docs-push'), { source, before, after: git(source, 'rev-parse', 'HEAD') })
+
+    const run = runPublisher(cloneDocs(world, 'docs-release'), { source: releaseCheckout, tag: TAG })
+
+    expect(pushed.status).toBe(0)
+    expect(run.status).toBe(0)
+    expect(readFile(readRemote(world), 'site/raw/features/README.md')).toBe('# v2 readme\n')
+    expect(run.summary).toContain(
+      'Skipped the Area files of `site/raw/features`: the source branch `main` moved past the checkout, so this run cannot tell whether newer ones are already published.',
+    )
+  })
+
+  test('keeps an Area file named latest, which no rebuild of a named Area writes', () => {
+    const entry = releaseEntry({ areaFiles: [{ from: 'README.md', to: 'latest' }] })
+    const source = sourceWith(entry, TAG, { 'README.md': '# v1 readme\n' })
+    // The commit holds the tag the stale checkout releases, so the Area file of that checkout is already published.
+    git(source, 'tag', 'alpha-v2.0.0')
+    expect(runPublisher(cloneDocs(world, 'docs-seed-latest'), { source, tag: TAG }).status).toBe(0)
+    const releaseCheckout = cloneSource(world, source, 'release-checkout-latest')
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'README.md': '# v2 readme\n' }, 'newer area files')
+    const pushed = runPublisher(cloneDocs(world, 'docs-push-latest'), { source, before, after: git(source, 'rev-parse', 'HEAD') })
+
+    const run = runPublisher(cloneDocs(world, 'docs-release-latest'), { source: releaseCheckout, tag: 'alpha-v2.0.0' })
+
+    expect(pushed.status).toBe(0)
+    expect(run.status).toBe(0)
+    expect(readFile(readRemote(world), 'site/raw/features/latest')).toBe('# v2 readme\n')
+    expect(exists(readRemote(world), 'site/raw/features/alpha/2.0.0/.meta.json')).toBe(true)
+  })
+
+  test('keeps an Area file a newer release added while its own push was rejected', async () => {
+    const source = sourceWith(releaseEntry(), TAG, { 'README.md': '# v1 readme\n' })
+    const docs = cloneDocs(world, 'docs-older')
+    const ready = join(world.base, 'notice-ready')
+    const resume = join(world.base, 'notice-resume')
+    write(docs, { '.git/hooks/pre-push': `#!/bin/sh\ntouch "${ready}"\nwhile [ ! -f "${resume}" ]; do sleep 0.01; done\n` })
+    chmodSync(join(docs, '.git/hooks/pre-push'), 0o755)
+    const pending = startPublisher(docs, { source, tag: TAG })
+    let winner
+    try {
+      await waitForFile(ready)
+      // The newer release names one more Area file, and publishes it.
+      releaseCommit(source, {
+        'NOTICE.md': '# notice\n',
+        ...entriesFile([releaseEntry({
+          areaFiles: [{ from: 'README.md', to: 'README.md' }, { from: 'NOTICE.md', to: 'NOTICE.md' }],
+        })]),
+      }, 'alpha-v2.0.0', '2026-02-02T03:04:05Z')
+      winner = runPublisher(cloneDocs(world, 'docs-newer'), { source, tag: 'alpha-v2.0.0' })
+    } finally {
+      write(world.base, { 'notice-resume': '' })
+    }
+    const run = await pending
+
+    expect(winner.status).toBe(0)
+    expect(run.status).toBe(0)
+    expect(run.output).toContain('Push to "main" rejected (attempt 1 of 5), syncing and retrying')
+    const landed = readRemote(world)
+    expect(exists(landed, 'site/raw/features/NOTICE.md')).toBe(true)
+    expect(readFile(landed, 'site/raw/features/NOTICE.md')).toBe('# notice\n')
+    expect(readFile(landed, 'site/raw/features/README.md')).toBe('# v1 readme\n')
+    expect(run.summary).toContain(
+      "Kept the Area files of `site/raw/features`: the Area's shared files changed since this release started.",
+    )
+  }, 20000)
+
   test('keeps the Area files a push rebuilt while a release waited to retry', async () => {
     const source = sourceWith(releaseEntry(), TAG, { 'README.md': '# v1 readme\n' })
     expect(runPublisher(cloneDocs(world, 'area-seed'), { source, tag: TAG }).status).toBe(0)

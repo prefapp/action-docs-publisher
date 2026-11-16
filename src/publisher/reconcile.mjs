@@ -24,6 +24,7 @@ import {
   groupBy,
   hasTreeAt,
   isAncestor,
+  keptAreaFiles,
   lstatOrNull,
   put,
   tagDate,
@@ -275,10 +276,7 @@ export function planReconcileWrites(docs, areas, { source, repository, root, sou
     }
     if (skipReason) {
       report.areaFilesSkipped.push({ dir: area.areaDir, reason: skipReason })
-      for (const rel of area.areaFiles.keys()) {
-        assertNoSymlinkPath(docs, rel)
-        if (lstatOrNull(path.join(docs, rel))?.isFile()) put(files, rel, { content: fs.readFileSync(path.join(docs, rel)) })
-      }
+      for (const [rel, file] of keptAreaFiles(docs, area.areaDir, area.entry)) put(files, rel, file)
     } else {
       for (const [rel, file] of area.areaFiles) put(files, rel, file)
     }
@@ -298,6 +296,7 @@ export function planReconcileSharedAreas({ args, repository, root, areas, reconc
       checkPlacement?.(area)
       shared.push({
         areaDir: area.areaDir,
+        entry: area.entry,
         ...planSharedArea({
           docs: args.docs, root, entry: area.entry, repository, branch: args.branch,
           docsRepository: args['docs-repository'], versions: reconcile.areas[index].versions,

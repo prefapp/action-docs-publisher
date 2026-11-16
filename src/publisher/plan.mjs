@@ -10,6 +10,7 @@ import {
   assertNoSymlinkPath,
   collectFiles,
   commitDate,
+  generatedAreaNames,
   git,
   lstatOrNull,
   metaFile,
@@ -116,16 +117,16 @@ function recordReleaseChanges({ args, areas, report, add }) {
   }
 }
 
-// The names a rebuild generates at the top of an Area. Every other file there is an Area file of the entry.
-const GENERATED_AREA_NAMES = new Set(['index.json', 'versions.json', 'latest', '.meta.json'])
-
 // What the Area's shared files would gain, lose or overwrite, read off the bytes the rebuild plans for them: the plan
 // writes nothing, so it compares them with the docs repo instead of staging them.
-function sharedFileChanges({ docs, areaDir, plan }) {
+function sharedFileChanges({ docs, areaDir, entry, plan }) {
   const areaFiles = []
   const generated = []
+  // A top-level name the rebuild does not generate is an Area file, `latest` included: only an Area without
+  // `packages` has a Latest folder there.
+  const names = generatedAreaNames(entry)
   const record = (rel, verb) => {
-    const label = path.posix.dirname(rel) === areaDir && !GENERATED_AREA_NAMES.has(path.posix.basename(rel))
+    const label = path.posix.dirname(rel) === areaDir && !names.has(path.posix.basename(rel))
       ? 'Area file'
       : 'shared file'
     const line = `- ${verb} ${label} \`${rel.slice(areaDir.length + 1)}\`.`
@@ -164,8 +165,8 @@ function sharedFileChanges({ docs, areaDir, plan }) {
 // four times by the files that follow it.
 function recordSharedChanges({ docs, shared, changes, add }) {
   let planned = false
-  for (const { areaDir, ...plan } of shared) {
-    const { areaFiles, generated } = sharedFileChanges({ docs, areaDir, plan })
+  for (const { areaDir, entry, ...plan } of shared) {
+    const { areaFiles, generated } = sharedFileChanges({ docs, areaDir, entry, plan })
     const lines = changes.has(areaDir) || areaFiles.length > 0 ? areaFiles : generated
     for (const line of lines) add(areaDir, line)
     if (lines.length > 0) planned = true

@@ -28,6 +28,7 @@ import {
   runPublisher,
   runReconcile,
   seedDocs,
+  SOURCE_REPO,
   tagRelease,
   unnamedReleaseEntry,
 } from '../test/harness.mjs'
@@ -117,6 +118,173 @@ describe('a release entry that publishes its source branch', () => {
     expect(readFile(landed, `${FEATURES_AREA}/index.json`)).toBe(index)
     expect(readJson(landed, `${FEATURES_AREA}/index.json`).features.map((row) => row.name)).toEqual(['alpha'])
     expect(readFile(landed, `${FEATURES_AREA}/alpha/1.0.0/intro.md`)).toBe('# alpha\n')
+  })
+
+  test('a push refreshes a Branch Version folder its own range does not name', () => {
+    const source = makeSource(world)
+    releaseCommit(
+      source,
+      { ...featureFiles('alpha'), ...entriesFile([releaseEntry({ publishSourceBranch: true })]) },
+      'alpha-v1.0.0',
+      DATE,
+    )
+    expect(runPublisher(cloneDocs(world, 'seeded'), { source, tag: 'alpha-v1.0.0' }).status).toBe(0)
+    const seeded = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# alpha on main\n' }, 'alpha docs on main')
+    expect(runPublisher(cloneDocs(world, 'alpha-push'), { source, before: seeded, after: git(source, 'rev-parse', 'HEAD') }).status).toBe(0)
+    // The push that reaches alpha builds its folder, and a later push moves the branch on without naming alpha again.
+    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# alpha after the race\n' }, 'alpha docs again')
+    const unrelated = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'README.md': '# Features (main)\n' }, 'a file no package holds')
+
+    const run = runPublisher(cloneDocs(world, 'later-push'), { source, before: unrelated, after: git(source, 'rev-parse', 'HEAD') })
+
+    expect(run.status).toBe(0)
+    expect(readTree(readRemote(world), `${FEATURES_AREA}/alpha/main`)).toEqual({
+      '.meta.json': branchMeta(source, 'features'),
+      'CHANGELOG.md': '# Changelog\n',
+      'images/logo.png': image('alpha-logo'),
+      'intro.md': '# alpha after the race\n',
+      'schema.json': '{}\n',
+    })
+  })
+
+  test('a push from the branch tip rebuilds a Branch Version folder whose marker names a commit it does not have', () => {
+    const source = makeSource(world)
+    releaseCommit(
+      source,
+      { ...featureFiles('alpha'), ...entriesFile([releaseEntry({ publishSourceBranch: true })]) },
+      'alpha-v1.0.0',
+      DATE,
+    )
+    // The folder was built from a history the source branch has since been rewritten away from.
+    seedDocs(world, {
+      [`${FEATURES_AREA}/alpha/main/.meta.json`]: meta({
+        source: SOURCE_REPO, area: 'features', branch: 'main', sourceRevision: 'a'.repeat(40), date: DATE,
+      }),
+      [`${FEATURES_AREA}/alpha/main/intro.md`]: '# a build from a history this repo no longer has\n',
+    })
+    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# alpha at the tip\n' }, 'the history is rewritten')
+    const head = git(source, 'rev-parse', 'HEAD')
+
+    // The range names no package: only the marker can tell that the folder is not the tip's build.
+    const run = runPublisher(cloneDocs(world, 'docs-rewritten'), { source, before: head, after: head })
+
+    expect(run.status).toBe(0)
+    expect(readTree(readRemote(world), `${FEATURES_AREA}/alpha/main`)).toEqual({
+      '.meta.json': branchMeta(source, 'features'),
+      'CHANGELOG.md': '# Changelog\n',
+      'images/logo.png': image('alpha-logo'),
+      'intro.md': '# alpha at the tip\n',
+      'schema.json': '{}\n',
+    })
+  })
+
+  test('a push from a checkout behind the published Branch Version folder leaves it alone', () => {
+    const source = makeSource(world)
+    releaseCommit(
+      source,
+      { ...featureFiles('alpha'), ...entriesFile([releaseEntry({ publishSourceBranch: true })]) },
+      'alpha-v1.0.0',
+      DATE,
+    )
+    const behind = cloneSource(world, source, 'checkout-behind')
+    const seeded = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# alpha on main\n' }, 'alpha docs on main')
+    expect(runPublisher(cloneDocs(world, 'docs-tip'), { source, before: seeded, after: git(source, 'rev-parse', 'HEAD') }).status).toBe(0)
+    const published = readTree(readRemote(world), `${FEATURES_AREA}/alpha/main`)
+    // The range names alpha, so this push would rebuild it from a checkout that never had the published commit.
+    git(behind, 'fetch', '--quiet', 'origin')
+
+    const run = runPublisher(cloneDocs(world, 'docs-behind'), { source: behind, before: seeded, after: git(source, 'rev-parse', 'HEAD') })
+
+    expect(run.status).toBe(0)
+    expect(readTree(readRemote(world), `${FEATURES_AREA}/alpha/main`)).toEqual(published)
+  })
+
+  test('a push from behind the tip leaves a Branch Version folder whose marker names an unknown commit', () => {
+    const source = makeSource(world)
+    releaseCommit(
+      source,
+      { ...featureFiles('alpha'), ...entriesFile([releaseEntry({ publishSourceBranch: true })]) },
+      'alpha-v1.0.0',
+      DATE,
+    )
+    const unknown = meta({
+      source: SOURCE_REPO, area: 'features', branch: 'main', sourceRevision: 'a'.repeat(40), date: DATE,
+    })
+    seedDocs(world, {
+      [`${FEATURES_AREA}/alpha/main/.meta.json`]: unknown,
+      [`${FEATURES_AREA}/alpha/main/intro.md`]: '# a build from a history this repo no longer has\n',
+    })
+    const behind = cloneSource(world, source, 'checkout-behind-unknown')
+    const head = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'notes.md': '# Notes\n' }, 'the branch moves on')
+    git(behind, 'fetch', '--quiet', 'origin')
+
+    const run = runPublisher(cloneDocs(world, 'docs-unknown'), { source: behind, before: head, after: head })
+
+    expect(run.status).toBe(0)
+    expect(readTree(readRemote(world), `${FEATURES_AREA}/alpha/main`)).toEqual({
+      '.meta.json': unknown,
+      'intro.md': '# a build from a history this repo no longer has\n',
+    })
+  })
+
+  test('a push from behind the tip does not recreate a Branch Version folder a newer run retired', () => {
+    const source = makeSource(world)
+    releaseCommit(
+      source,
+      { ...featureFiles('alpha'), ...entriesFile([releaseEntry({ publishSourceBranch: true })]) },
+      'alpha-v1.0.0',
+      DATE,
+    )
+    expect(runReconcile(world, source).status).toBe(0)
+    expect(exists(readRemote(world), `${FEATURES_AREA}/alpha/main`)).toBe(true)
+    // The push changes alpha, and a newer run retires the folder before this one resumes.
+    const behind = cloneSource(world, source, 'checkout-behind-retired')
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# alpha on main\n' }, 'alpha docs on main')
+    const after = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { ...entriesFile([releaseEntry()]) }, 'stop publishing the branch')
+    expect(runReconcile(world, source).status).toBe(0)
+    expect(exists(readRemote(world), `${FEATURES_AREA}/alpha/main`)).toBe(false)
+    git(behind, 'fetch', '--quiet', 'origin')
+
+    const run = runPublisher(cloneDocs(world, 'docs-retired'), { source: behind, before, after })
+
+    expect(run.status).toBe(0)
+    expect(exists(readRemote(world), `${FEATURES_AREA}/alpha/main`)).toBe(false)
+  })
+
+  test('a push from the tip leaves a Branch Version folder built from a commit ahead of it', () => {
+    const source = makeSource(world)
+    releaseCommit(
+      source,
+      { ...featureFiles('alpha'), ...entriesFile([releaseEntry({ publishSourceBranch: true })]) },
+      'alpha-v1.0.0',
+      DATE,
+    )
+    // The docs hold a build from a commit the branch tip does not contain, and this checkout has it.
+    const tip = git(source, 'rev-parse', 'HEAD')
+    git(source, 'checkout', '--quiet', '-b', 'ahead')
+    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# alpha ahead\n' }, 'a commit the tip does not have')
+    const ahead = meta({
+      source: SOURCE_REPO, area: 'features', branch: 'main', sourceRevision: git(source, 'rev-parse', 'HEAD'), date: DATE,
+    })
+    git(source, 'checkout', '--quiet', 'main')
+    seedDocs(world, {
+      [`${FEATURES_AREA}/alpha/main/.meta.json`]: ahead,
+      [`${FEATURES_AREA}/alpha/main/intro.md`]: '# alpha ahead\n',
+    })
+
+    const run = runPublisher(cloneDocs(world, 'docs-ahead'), { source, before: tip, after: tip })
+
+    expect(run.status).toBe(0)
+    expect(readTree(readRemote(world), `${FEATURES_AREA}/alpha/main`)).toEqual({
+      '.meta.json': ahead,
+      'intro.md': '# alpha ahead\n',
+    })
   })
 
   test('turning publishSourceBranch off prunes the branch folder and keeps the Version folders', () => {

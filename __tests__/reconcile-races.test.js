@@ -205,6 +205,46 @@ describe('a reconcile that runs again or loses a race', () => {
     expect(rejected.summary).toContain(`- Skipped \`${AREA}/alpha/1.0.0\`: the source branch \`main\` moved past the checkout`)
   }, 30000)
 
+  test('keeps an Area file a newer release added while it waited to retry', async () => {
+    const ready = join(world.base, 'notice-reconcile-ready')
+    const resume = join(world.base, 'notice-reconcile-resume')
+    const source = featuresSource({
+      releases: [{
+        tag: 'alpha-v1.0.0',
+        date: '2026-01-01T00:00:00Z',
+        files: { ...packageFiles('alpha'), 'README.md': '# Features (main)\n' },
+      }],
+    })
+    const checkout = cloneSource(world, source, 'source-notice-reconcile')
+    const docs = cloneDocs(world, 'docs-notice-reconcile')
+    write(docs, { '.git/hooks/pre-push': `#!/bin/sh\ntouch "${ready}"; while [ ! -f "${resume}" ]; do sleep 0.01; done\n` })
+    chmodSync(join(docs, '.git/hooks/pre-push'), 0o755)
+    const pending = startPublisher(docs, { source: checkout, reconcile: true })
+    let release
+    try {
+      await waitForFile(ready)
+      // The newer release names one more Area file, and publishes it.
+      releaseCommit(source, {
+        ...packageFiles('alpha', '# New release\n'),
+        'NOTICE.md': '# Notice\n',
+        ...entriesFile([releaseEntry({
+          areaFiles: [{ from: 'README.md', to: 'README.md' }, { from: 'NOTICE.md', to: 'NOTICE.md' }],
+        })]),
+      }, 'alpha-v2.0.0', '2026-02-01T00:00:00Z')
+      release = runPublisher(cloneDocs(world, 'docs-release'), { source, tag: 'alpha-v2.0.0' })
+    } finally {
+      write(world.base, { 'notice-reconcile-resume': '' })
+    }
+    const reconcile = await pending
+
+    expect(release.status).toBe(0)
+    expect(reconcile.status).toBe(0)
+    const landed = readRemote(world)
+    expect(exists(landed, `${AREA}/alpha/2.0.0/.meta.json`)).toBe(true)
+    expect(exists(landed, `${AREA}/NOTICE.md`)).toBe(true)
+    expect(readFile(landed, `${AREA}/NOTICE.md`)).toBe('# Notice\n')
+  }, 20000)
+
   test('re-plans a push reconcile after a manual run republishes the same drifted version', async () => {
     const ready = join(world.base, 'reconcile-ready')
     const resume = join(world.base, 'reconcile-resume')
@@ -359,5 +399,45 @@ describe('a prune whose source branch moved under the run', () => {
     expect(exists(landed, `${AREA}/beta/1.0.0/.meta.json`)).toBe(true)
     expect(readJson(landed, `${AREA}/index.json`).features.map((row) => row.name)).toEqual(['beta'])
     expect(pushed.summary).toContain('Skipped prune: the source branch `main` moved past the checkout')
+  }, 20000)
+})
+
+describe('a push whose checkout is behind the source branch tip', () => {
+  test('keeps an Area file a newer run published and its own entry does not name', () => {
+    const area = 'site/raw/core/crds'
+    const source = makeSource(world)
+    releaseCommit(source, {
+      'index.yaml': 'v1\n',
+      'README.md': '# CRDS\n',
+      ...entriesFile([unnamedReleaseEntry({ areaFiles: [{ from: 'README.md', to: 'README.md' }] })]),
+    }, 'v1.0.0', '2026-01-01T00:00:00Z')
+    expect(runReconcile(world, source).status).toBe(0)
+    expect(readFile(readRemote(world), `${area}/README.md`)).toBe('# CRDS\n')
+    // This push changes index.yaml, and a newer run names one more Area file before it resumes.
+    const behind = cloneSource(world, source, 'checkout-behind-tip')
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'index.yaml': 'v2 on main\n' }, 'crds on main')
+    const after = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, {
+      'NOTICE.md': '# Notice\n',
+      ...entriesFile([unnamedReleaseEntry({
+        areaFiles: [{ from: 'README.md', to: 'README.md' }, { from: 'NOTICE.md', to: 'NOTICE.md' }],
+      })]),
+    }, 'name one more Area file')
+    expect(runReconcile(world, source).status).toBe(0)
+    expect(readFile(readRemote(world), `${area}/NOTICE.md`)).toBe('# Notice\n')
+    git(behind, 'fetch', '--quiet', 'origin')
+    const commits = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world, 'docs-behind-tip'), { source: behind, before, after })
+
+    expect(run.status).toBe(0)
+    const landed = readRemote(world)
+    expect(exists(landed, `${area}/NOTICE.md`)).toBe(true)
+    expect(readFile(landed, `${area}/NOTICE.md`)).toBe('# Notice\n')
+    expect(remoteCommitCount(world)).toBe(commits)
+    expect(run.summary).toContain(
+      'Skipped the Area files of `site/raw/core/crds`: the source branch `main` moved past the checkout',
+    )
   }, 20000)
 })

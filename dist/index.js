@@ -32516,6 +32516,10 @@ function folderNames(dir) {
   return fs4.readdirSync(dir).filter((name) => lstatOrNull(path3.join(dir, name))?.isDirectory());
 }
 var metaFile = (fields) => ({ content: JSON.stringify(fields, null, 2) + "\n" });
+var GENERATED_AREA_NAMES = /* @__PURE__ */ new Set(["index.json", "versions.json", ".meta.json"]);
+function generatedAreaNames(entry) {
+  return entry.packages === void 0 ? /* @__PURE__ */ new Set([...GENERATED_AREA_NAMES, "latest"]) : GENERATED_AREA_NAMES;
+}
 function readAreaFiles(source, areaDir, entry) {
   const files = /* @__PURE__ */ new Map();
   for (const rule of entry.areaFiles) {
@@ -32736,16 +32740,23 @@ function existingVersionFolders(docs, areaDir, entry) {
   }
   return folders.sort((a, b) => a.dir.localeCompare(b.dir));
 }
-function keptAreaFiles(docs, areaFiles) {
+function keptAreaFiles(docs, areaDir, entry) {
   const kept = /* @__PURE__ */ new Map();
-  for (const rel of areaFiles.keys()) {
-    assertNoSymlinkPath(docs, rel);
+  const dir = path3.join(docs, areaDir);
+  if (!lstatOrNull(dir)?.isDirectory()) return kept;
+  const generated = generatedAreaNames(entry);
+  for (const name of fs4.readdirSync(dir).sort()) {
+    if (generated.has(name)) continue;
+    const rel = path3.posix.join(areaDir, name);
     if (lstatOrNull(path3.join(docs, rel))?.isFile()) kept.set(rel, { content: fs4.readFileSync(path3.join(docs, rel)) });
   }
   return kept;
 }
 function keptAreaFilesSummary(areaDir, run) {
   writeSummary(`Kept the Area files of \`${areaDir}\`: the Area's shared files changed since ${run} started.`);
+}
+function staleAreaFilesSummary(areaDir, sourceBranch) {
+  writeSummary(`Skipped the Area files of \`${areaDir}\`: the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell whether newer ones are already published.`);
 }
 function areaFileProblemsSummary(areaDir, problem) {
   writeSummary(`Kept the Area files of \`${areaDir}\`: ${problem}; run a manual run to repair it.`);
@@ -33421,7 +33432,7 @@ function planVersion({ source, root, entry, release, repository, date, tag }) {
   });
   return { versionDir, name: release.name, version: release.version, files };
 }
-function planBranchVersion({ source, root, entry, name, repository, branch, revision, date }) {
+function branchVersionDir(root, entry, name, branch) {
   const areaDir = path7.posix.join(root, entry.area);
   const dir = path7.posix.join(areaDir, ...name ? [name] : [], branch);
   if (!dir.startsWith(`${areaDir}/`)) {
@@ -33429,6 +33440,10 @@ function planBranchVersion({ source, root, entry, name, repository, branch, revi
       `refusing to publish the Branch Version folder of the Area "${entry.area}" outside it: "${branch}" leaves the Area`
     );
   }
+  return dir;
+}
+function planBranchVersion({ source, root, entry, name, repository, branch, revision, date }) {
+  const dir = branchVersionDir(root, entry, name, branch);
   const files = collectPackage({
     source,
     entry,
@@ -33453,6 +33468,35 @@ function touchedPackages({ source, entry, changed }) {
   const prefix = packagesDir === "." ? "" : `${packagesDir}/`;
   const names = changed.filter((file) => file.startsWith(prefix)).map((file) => file.slice(prefix.length).split("/")[0]);
   return [...new Set(names)].filter((name) => name !== "" && lstatOrNull(path7.join(source, packagesDir, name))?.isDirectory());
+}
+function rebuildPackages({ source, docs, root, entry, branch, changed, tip }) {
+  const head = git(source, ["rev-parse", "HEAD"]);
+  const touched = new Set(touchedPackages({ source, entry, changed }));
+  const diffs = /* @__PURE__ */ new Map();
+  const changedSince = (revision) => {
+    if (!diffs.has(revision)) {
+      const result = gitStatus(source, ["diff", "--no-renames", "--name-only", "-z", `${revision}..${head}`]);
+      diffs.set(revision, result.status === 0 ? result.stdout.split("\0").filter(Boolean) : null);
+    }
+    return diffs.get(revision);
+  };
+  const candidates = entry.packages === void 0 ? [null] : folderNames(path7.join(source, nestedRepoPath(entry.packages).path));
+  return candidates.filter((name) => {
+    let record;
+    try {
+      record = markerRecordAt(docs, root, branchVersionDir(root, entry, name, branch));
+    } catch (error2) {
+      if (!(error2 instanceof FatalError)) throw error2;
+      return tip && touched.has(name);
+    }
+    if (record === null) return tip && touched.has(name);
+    const revision = record.sourceRevision;
+    if (revision === head) return false;
+    if (isAncestor(source, revision, head)) {
+      return touchedPackages({ source, entry, changed: changedSince(revision) }).includes(name);
+    }
+    return tip && !isAncestor(source, head, revision);
+  });
 }
 function publishRelease({ args, release, repository, root }) {
   if (!tagExists(args.source, args.tag)) throw new FatalError(`tag ${args.tag} not found in ${args.source}`);
@@ -33500,6 +33544,7 @@ function publishAtTag({ args, release, repository, root, date, tagSource }) {
     };
   });
   const staleAreaFiles = /* @__PURE__ */ new Set();
+  const movedAreaFiles = /* @__PURE__ */ new Set();
   const kept = /* @__PURE__ */ new Set();
   const { changed, commitSha } = publishWithRetry({
     docs: args.docs,
@@ -33511,6 +33556,9 @@ function publishAtTag({ args, release, repository, root, date, tagSource }) {
       const plans = [];
       kept.clear();
       staleAreaFiles.clear();
+      movedAreaFiles.clear();
+      let moved;
+      const sourceMoved = () => moved ??= sourceBranchMoved(args.source, args["source-branch"]);
       try {
         assertRecordOwners(scan(args.docs, root).records, areas.map((area) => area.areaDir), root, repository);
       } catch (error2) {
@@ -33541,6 +33589,7 @@ function publishAtTag({ args, release, repository, root, date, tagSource }) {
           });
           const fresh = snapshotAreaState(args.docs, root, area.areaDir, area.entry) === area.state;
           if (!fresh) staleAreaFiles.add(area);
+          else if (area.entry.areaFiles.length > 0 && sourceMoved()) movedAreaFiles.add(area);
           plans.push({
             version,
             plan: planSharedArea({
@@ -33551,7 +33600,7 @@ function publishAtTag({ args, release, repository, root, date, tagSource }) {
               branch: args.branch,
               docsRepository: args["docs-repository"],
               versions: [version],
-              areaFiles: fresh ? area.areaFiles : keptAreaFiles(args.docs, area.areaFiles)
+              areaFiles: fresh && !moved ? area.areaFiles : keptAreaFiles(args.docs, area.areaDir, area.entry)
             })
           });
         } catch (error2) {
@@ -33574,6 +33623,7 @@ function publishAtTag({ args, release, repository, root, date, tagSource }) {
     if (kept.has(area)) writeSummary(`Already published \`${args.tag}\` in area \`${area.entry.area}\`: kept \`${area.versionDir}\` as it is.`);
   }
   for (const area of staleAreaFiles) keptAreaFilesSummary(area.areaDir, "this release");
+  for (const area of movedAreaFiles) staleAreaFilesSummary(area.areaDir, args["source-branch"]);
   if (kept.size === areas.length) return { changed, commitSha };
   writeSummary(changed ? `Published \`${args.tag}\` to \`${args.branch}\` under \`${areas.find((area) => !kept.has(area)).versionDir}\`.` : `Nothing to publish for \`${args.tag}\`: the docs repo already holds it.`);
   return { changed, commitSha };
@@ -33717,16 +33767,14 @@ function mirrorSummary(mirrors, branch, changed) {
   const areas = mirrors.map((area) => area.area).join(" ");
   writeSummary(changed ? `Mirrored ${areas} to \`${branch}\`.` : `Nothing to publish: the docs repo already holds the mirror entries (${areas}).`);
 }
-function staleAreaFilesSummary(areaDir, sourceBranch) {
-  writeSummary(`Skipped the Area files of \`${areaDir}\`: the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell whether newer ones are already published.`);
-}
-function planRebuild({ args, repository, root, source, sourceRevision }) {
+function planRebuild({ args, repository, root, source, sourceRevision, stale }) {
   const { entry } = source;
   const areaFiles = readAreaFiles(args.source, source.areaDir, entry);
-  const fresh = areaIsFresh(args.docs, root, source);
+  const fresh = !stale && areaIsFresh(args.docs, root, source);
   return {
     fresh,
-    // The branch tip moved, so the folder holds the build output of the packages this push touched.
+    // The tip moved, so each folder holds the build output of the packages this push changed, or of the package a
+    // superseded push left behind.
     branches: entry.publishSourceBranch === true ? planBranchVersions({
       source: args.source,
       root,
@@ -33734,16 +33782,24 @@ function planRebuild({ args, repository, root, source, sourceRevision }) {
       repository,
       branch: args["source-branch"],
       revision: sourceRevision,
-      names: touchedPackages({ source: args.source, entry, changed: source.changed })
+      names: rebuildPackages({
+        source: args.source,
+        docs: args.docs,
+        root,
+        entry,
+        branch: args["source-branch"],
+        changed: source.changed,
+        tip: !stale
+      })
     }) : [],
-    plan: entry.areaFiles.length === 0 ? null : planSharedArea({
+    plan: stale || entry.areaFiles.length === 0 ? null : planSharedArea({
       docs: args.docs,
       root,
       entry,
       repository,
       branch: args.branch,
       docsRepository: args["docs-repository"],
-      areaFiles: fresh ? areaFiles : keptAreaFiles(args.docs, areaFiles)
+      areaFiles: fresh ? areaFiles : keptAreaFiles(args.docs, source.areaDir, entry)
     })
   };
 }
@@ -33757,16 +33813,14 @@ function planPushAttempt({ args, repository, root, mirrors, sourceRevision, area
   const problems = /* @__PURE__ */ new Map();
   const staleAreaFiles = /* @__PURE__ */ new Set();
   const shared = [];
-  if (!stale) {
-    for (const source of areaFileSources) {
-      try {
-        const { fresh, plan, branches } = planRebuild({ args, repository, root, source, sourceRevision });
-        if (!fresh) staleAreaFiles.add(source.areaDir);
-        shared.push({ area: source.entry.area, areaDir: source.areaDir, plan, branches });
-      } catch (error2) {
-        if (!(error2 instanceof FatalError)) throw error2;
-        problems.set(source.areaDir, error2.message.split("\n")[0]);
-      }
+  for (const source of areaFileSources) {
+    try {
+      const { fresh, plan, branches } = planRebuild({ args, repository, root, source, sourceRevision, stale });
+      if (!stale && !fresh) staleAreaFiles.add(source.areaDir);
+      shared.push({ area: source.entry.area, areaDir: source.areaDir, plan, branches });
+    } catch (error2) {
+      if (!(error2 instanceof FatalError)) throw error2;
+      problems.set(source.areaDir, error2.message.split("\n")[0]);
     }
   }
   const writable = planMirrorWrites({ args, repository, mirrors });
@@ -34053,10 +34107,7 @@ function planReconcileWrites(docs, areas, { source, repository, root, sourceBran
     }
     if (skipReason) {
       report.areaFilesSkipped.push({ dir: area.areaDir, reason: skipReason });
-      for (const rel of area.areaFiles.keys()) {
-        assertNoSymlinkPath(docs, rel);
-        if (lstatOrNull(path9.join(docs, rel))?.isFile()) put(files, rel, { content: fs9.readFileSync(path9.join(docs, rel)) });
-      }
+      for (const [rel, file] of keptAreaFiles(docs, area.areaDir, area.entry)) put(files, rel, file);
     } else {
       for (const [rel, file] of area.areaFiles) put(files, rel, file);
     }
@@ -34074,6 +34125,7 @@ function planReconcileSharedAreas({ args, repository, root, areas, reconcile, ch
       checkPlacement?.(area);
       shared.push({
         areaDir: area.areaDir,
+        entry: area.entry,
         ...planSharedArea({
           docs: args.docs,
           root,
@@ -34291,12 +34343,12 @@ function recordReleaseChanges({ args, areas, report, add }) {
     })) add(area.areaDir, line);
   }
 }
-var GENERATED_AREA_NAMES = /* @__PURE__ */ new Set(["index.json", "versions.json", "latest", ".meta.json"]);
-function sharedFileChanges({ docs, areaDir, plan }) {
+function sharedFileChanges({ docs, areaDir, entry, plan }) {
   const areaFiles = [];
   const generated = [];
+  const names = generatedAreaNames(entry);
   const record = (rel, verb) => {
-    const label = path10.posix.dirname(rel) === areaDir && !GENERATED_AREA_NAMES.has(path10.posix.basename(rel)) ? "Area file" : "shared file";
+    const label = path10.posix.dirname(rel) === areaDir && !names.has(path10.posix.basename(rel)) ? "Area file" : "shared file";
     const line = `- ${verb} ${label} \`${rel.slice(areaDir.length + 1)}\`.`;
     if (label === "Area file") areaFiles.push(line);
     else generated.push(line);
@@ -34327,8 +34379,8 @@ function sharedFileChanges({ docs, areaDir, plan }) {
 }
 function recordSharedChanges({ docs, shared, changes, add }) {
   let planned = false;
-  for (const { areaDir, ...plan } of shared) {
-    const { areaFiles, generated } = sharedFileChanges({ docs, areaDir, plan });
+  for (const { areaDir, entry, ...plan } of shared) {
+    const { areaFiles, generated } = sharedFileChanges({ docs, areaDir, entry, plan });
     const lines = changes.has(areaDir) || areaFiles.length > 0 ? areaFiles : generated;
     for (const line of lines) add(areaDir, line);
     if (lines.length > 0) planned = true;
