@@ -167,6 +167,41 @@ describe('release selection and collection', () => {
     )
   })
 
+  // The older entry names no Area files, so the release plans no file of its own: the newer push's README must survive
+  // the shared-file rebuild the Version folder still needs.
+  test('keeps an Area file a push named before a release whose own entry names none', () => {
+    const source = makeSource(world)
+    releaseCommit(source, {
+      ...featureFiles('alpha'),
+      'README.md': '# v1 readme\n',
+      ...entriesFile([releaseEntry({ areaFiles: [] })]),
+    }, 'alpha-v0.9.0', '2026-01-01T00:00:00Z')
+    expect(runPublisher(cloneDocs(world, 'docs-no-area-files-version'), { source, tag: 'alpha-v0.9.0' }).status).toBe(0)
+    const releaseCheckout = cloneSource(world, source, 'release-checkout-no-area-files')
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, {
+      'README.md': '# v2 readme\n',
+      ...entriesFile([releaseEntry()]),
+    }, 'name the Area file')
+    const pushSource = cloneSource(world, source, 'push-source-no-area-files')
+    const pushed = runPublisher(cloneDocs(world, 'docs-no-area-files-push'), {
+      source: pushSource, before, after: git(source, 'rev-parse', 'HEAD'),
+    })
+    // The tag lands after the push, so the push published the Area file without publishing this Version first.
+    git(source, 'tag', '-a', 'alpha-v1.0.0', before, '-m', 'alpha-v1.0.0')
+    git(releaseCheckout, 'fetch', '--quiet', '--tags', 'origin')
+
+    const run = runPublisher(cloneDocs(world, 'docs-no-area-files-release'), { source: releaseCheckout, tag: 'alpha-v1.0.0' })
+
+    expect(pushed.status).toBe(0)
+    expect(run.status).toBe(0)
+    expect(readFile(readRemote(world), 'site/raw/features/README.md')).toBe('# v2 readme\n')
+    expect(exists(readRemote(world), 'site/raw/features/alpha/1.0.0/.meta.json')).toBe(true)
+    expect(run.summary).toContain(
+      'Skipped the Area files of `site/raw/features`: the source branch `main` moved past the checkout, so this run cannot tell whether newer ones are already published.',
+    )
+  }, 20000)
+
   test('keeps an Area file named latest, which no rebuild of a named Area writes', () => {
     const entry = releaseEntry({ areaFiles: [{ from: 'README.md', to: 'latest' }] })
     const source = sourceWith(entry, TAG, { 'README.md': '# v1 readme\n' })

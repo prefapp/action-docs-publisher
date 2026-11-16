@@ -274,6 +274,11 @@ export function planReconcileWrites(docs, areas, { source, repository, root, sou
         skipReason = "a published version's tag is not an ancestor of the manual checkout"
       }
     }
+    // A checkout behind the branch tip may read an older entry than the one that published the Area files: it keeps
+    // the docs ones, whether or not its own entry names any.
+    if (!skipReason && sourceMoved) {
+      skipReason = `the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell whether newer ones are already published`
+    }
     if (skipReason) {
       report.areaFilesSkipped.push({ dir: area.areaDir, reason: skipReason })
       for (const [rel, file] of keptAreaFiles(docs, area.areaDir, area.entry)) put(files, rel, file)

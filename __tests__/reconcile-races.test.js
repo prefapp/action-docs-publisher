@@ -441,3 +441,38 @@ describe('a push whose checkout is behind the source branch tip', () => {
     )
   }, 20000)
 })
+
+describe('a reconcile whose checkout is behind the source branch tip', () => {
+  test('keeps an Area file a newer push named and its own entry does not', () => {
+    const area = 'site/raw/features'
+    const source = makeSource(world)
+    releaseCommit(source, {
+      ...featureFiles('alpha'),
+      'README.md': '# v1 readme\n',
+      ...entriesFile([releaseEntry({ areaFiles: [] })]),
+    }, 'alpha-v1.0.0', '2026-01-01T00:00:00Z')
+    expect(runReconcile(world, source).status).toBe(0)
+    const checkout = cloneSource(world, source, 'reconcile-checkout-behind')
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, {
+      'README.md': '# v2 readme\n',
+      ...entriesFile([releaseEntry()]),
+    }, 'name the Area file')
+    const pushed = runPublisher(cloneDocs(world, 'docs-push-behind-reconcile'), {
+      source: cloneSource(world, source, 'push-source-behind-reconcile'),
+      before,
+      after: git(source, 'rev-parse', 'HEAD'),
+    })
+    const commits = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world, 'docs-reconcile-behind'), { source: checkout, reconcile: true })
+
+    expect(pushed.status).toBe(0)
+    expect(run.status).toBe(0)
+    expect(readFile(readRemote(world), `${area}/README.md`)).toBe('# v2 readme\n')
+    expect(remoteCommitCount(world)).toBe(commits)
+    expect(run.summary).toContain(
+      `- Skipped Area files for \`${area}\`: the source branch \`main\` moved past the checkout`,
+    )
+  }, 20000)
+})

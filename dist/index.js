@@ -33589,7 +33589,7 @@ function publishAtTag({ args, release, repository, root, date, tagSource }) {
           });
           const fresh = snapshotAreaState(args.docs, root, area.areaDir, area.entry) === area.state;
           if (!fresh) staleAreaFiles.add(area);
-          else if (area.entry.areaFiles.length > 0 && sourceMoved()) movedAreaFiles.add(area);
+          else if (sourceMoved()) movedAreaFiles.add(area);
           plans.push({
             version,
             plan: planSharedArea({
@@ -34107,6 +34107,9 @@ function planReconcileWrites(docs, areas, { source, repository, root, sourceBran
       } else if (areaHasUnmergedRelease(source, docs, area)) {
         skipReason = "a published version's tag is not an ancestor of the manual checkout";
       }
+    }
+    if (!skipReason && sourceMoved) {
+      skipReason = `the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell whether newer ones are already published`;
     }
     if (skipReason) {
       report.areaFilesSkipped.push({ dir: area.areaDir, reason: skipReason });

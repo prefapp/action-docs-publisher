@@ -258,9 +258,10 @@ function publishAtTag({ args, release, repository, root, date, tagSource }) {
           })
           const fresh = snapshotAreaState(args.docs, root, area.areaDir, area.entry) === area.state
           // A newer push can publish the Area files before this attempt's first snapshot, and the snapshot then
-          // calls the Area fresh: a checkout behind the branch tip keeps the files the docs branch holds instead.
+          // calls the Area fresh: a checkout behind the branch tip keeps the files the docs branch holds instead,
+          // whether or not its own entry still names any.
           if (!fresh) staleAreaFiles.add(area)
-          else if (area.entry.areaFiles.length > 0 && sourceMoved()) movedAreaFiles.add(area)
+          else if (sourceMoved()) movedAreaFiles.add(area)
           plans.push({
             version,
             plan: planSharedArea({
