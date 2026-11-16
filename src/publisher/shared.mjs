@@ -119,7 +119,7 @@ function placementProblems(docs, root, areaDir, versions) {
   return problems
 }
 
-export function planSharedArea({ docs, root, entry, repository, branch, sourceBranch, docsRepository, versions = [], areaFiles = new Map() }) {
+export function planSharedArea({ docs, root, entry, repository, branch, docsRepository, versions = [], areaFiles = new Map() }) {
   const areaDir = path.posix.join(root, entry.area)
   const groups = new Map()
   const add = (name, version, dir, metadata, files) => {
@@ -128,6 +128,9 @@ export function planSharedArea({ docs, root, entry, repository, branch, sourceBr
   }
   const problems = []
   const records = markerRecords(docs, root, areaDir, (_dir, error) => problems.push(error.message))
+  // The Branch Version folders the marker reader validated: each holds content, not a version of this list, and prune
+  // decides when it retires. A folder it does not name is no Branch Version folder, whatever it is called.
+  const branchDirs = new Set(records.filter((record) => record.kind === 'Branch').map((record) => record.dir))
   try { assertRecordOwners(records, [areaDir], root, repository) } catch (error) {
     if (!(error instanceof FatalError)) throw error
     problems.push(error.message)
@@ -208,8 +211,7 @@ export function planSharedArea({ docs, root, entry, repository, branch, sourceBr
     const latest = sorted.find((item) => !SEMVER_REGEX.exec(item.version.replace(/^v/, '')).groups.prerelease)
     if (name) {
       for (const child of lstatOrNull(path.join(docs, parent))?.isDirectory() ? fs.readdirSync(path.join(docs, parent)) : []) {
-        // The Branch Version folder of both branches stays: it holds content, not a version of this list.
-        if (group.has(child) || child === 'versions.json' || child === sourceBranch) continue
+        if (group.has(child) || child === 'versions.json' || branchDirs.has(`${parent}/${child}`)) continue
         removals.push(`${parent}/${child}`)
       }
     } else {

@@ -33113,7 +33113,7 @@ function placementProblems(docs, root, areaDir, versions) {
   }
   return problems;
 }
-function planSharedArea({ docs, root, entry, repository, branch, sourceBranch, docsRepository, versions = [], areaFiles = /* @__PURE__ */ new Map() }) {
+function planSharedArea({ docs, root, entry, repository, branch, docsRepository, versions = [], areaFiles = /* @__PURE__ */ new Map() }) {
   const areaDir = path5.posix.join(root, entry.area);
   const groups = /* @__PURE__ */ new Map();
   const add = (name, version, dir, metadata, files2) => {
@@ -33122,6 +33122,7 @@ function planSharedArea({ docs, root, entry, repository, branch, sourceBranch, d
   };
   const problems = [];
   const records = markerRecords(docs, root, areaDir, (_dir, error2) => problems.push(error2.message));
+  const branchDirs = new Set(records.filter((record) => record.kind === "Branch").map((record) => record.dir));
   try {
     assertRecordOwners(records, [areaDir], root, repository);
   } catch (error2) {
@@ -33203,7 +33204,7 @@ function planSharedArea({ docs, root, entry, repository, branch, sourceBranch, d
     const latest = sorted.find((item) => !SEMVER_REGEX.exec(item.version.replace(/^v/, "")).groups.prerelease);
     if (name) {
       for (const child of lstatOrNull(path5.join(docs, parent))?.isDirectory() ? fs6.readdirSync(path5.join(docs, parent)) : []) {
-        if (group.has(child) || child === "versions.json" || child === sourceBranch) continue;
+        if (group.has(child) || child === "versions.json" || branchDirs.has(`${parent}/${child}`)) continue;
         removals.push(`${parent}/${child}`);
       }
     } else {
@@ -33542,7 +33543,6 @@ function publishAtTag({ args, release, repository, root, date, tagSource }) {
               entry: area.entry,
               repository,
               branch: args.branch,
-              sourceBranch: args["source-branch"],
               docsRepository: args["docs-repository"],
               versions: [version],
               areaFiles: fresh ? area.areaFiles : keptAreaFiles(args.docs, area.areaFiles)
@@ -33736,7 +33736,6 @@ function planRebuild({ args, repository, root, source, sourceRevision }) {
       entry,
       repository,
       branch: args.branch,
-      sourceBranch: args["source-branch"],
       docsRepository: args["docs-repository"],
       areaFiles: fresh ? areaFiles : keptAreaFiles(args.docs, areaFiles)
     })
@@ -34075,7 +34074,6 @@ function planReconcileSharedAreas({ args, repository, root, areas, reconcile, ch
           entry: area.entry,
           repository,
           branch: args.branch,
-          sourceBranch: args["source-branch"],
           docsRepository: args["docs-repository"],
           versions: reconcile.areas[index].versions,
           areaFiles: new Map([...reconcile.files].filter(([rel]) => path9.posix.dirname(rel) === area.areaDir))

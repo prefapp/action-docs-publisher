@@ -218,7 +218,7 @@ function planRebuild({ args, repository, root, source, sourceRevision }) {
       names: touchedPackages({ source: args.source, entry, changed: source.changed }),
     }) : [],
     plan: entry.areaFiles.length === 0 ? null : planSharedArea({
-      docs: args.docs, root, entry, repository, branch: args.branch, sourceBranch: args['source-branch'],
+      docs: args.docs, root, entry, repository, branch: args.branch,
       docsRepository: args['docs-repository'],
       areaFiles: fresh ? areaFiles : keptAreaFiles(args.docs, areaFiles),
     }),

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from '@jest/globals'
-import { cloneDocs, entriesFile, featureFiles, makeDocsRemote, makeSource, meta, readJson, readRemote, releaseCommit, releaseEntry, runPublisher, commitSource, git, readTree, readFile, exists, seedDocs, remoteCommitCount } from '../test/harness.mjs'
+import { cloneDocs, entriesFile, featureFiles, makeDocsRemote, makeSource, meta, readJson, readRemote, releaseCommit, releaseEntry, runPublisher, runReconcile, commitSource, git, readTree, readFile, exists, seedDocs, remoteCommitCount } from '../test/harness.mjs'
 
 let world
 beforeEach(() => { world = makeDocsRemote() })
@@ -146,6 +146,19 @@ describe('release shared files', () => {
     expect(run.status).toBe(0)
     expect(readJson(docs, 'site/raw/features/alpha/versions.json')[0].url)
       .toBe('https://raw.githubusercontent.com/firestartr-pro/docs/docs/preview%2350%25/site/raw/features/alpha/1.0.0/schema.json')
+  })
+
+  test('clears a folder named after the source branch that holds no Branch Version marker', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    expect(runPublisher(cloneDocs(world, 'stale-seed'), { source, tag: 'alpha-v1.0.0' }).status).toBe(0)
+    // Content at the branch's name, with no marker saying it is a Branch Version folder.
+    seedDocs(world, { 'site/raw/features/alpha/main/obsolete.md': '# Stale\n' })
+
+    const run = runReconcile(world, source)
+
+    expect(run.status).toBe(0)
+    expect(exists(readRemote(world), 'site/raw/features/alpha/main')).toBe(false)
   })
 
   test('writes Version metadata, versions.json and the hub-shaped index in one commit', () => {

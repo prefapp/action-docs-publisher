@@ -204,7 +204,6 @@ function publishAtTag({ args, release, repository, root, date, tagSource }) {
             version,
             plan: planSharedArea({
               docs: args.docs, root, entry: area.entry, repository, branch: args.branch,
-              sourceBranch: args['source-branch'],
               docsRepository: args['docs-repository'], versions: [version],
               areaFiles: fresh ? area.areaFiles : keptAreaFiles(args.docs, area.areaFiles),
             }),

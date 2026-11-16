@@ -178,6 +178,26 @@ describe('a release entry that publishes its source branch', () => {
     expect(readJson(landed, `${FEATURES_AREA}/alpha/versions.json`).map((row) => row.version)).toEqual(['1.1.0', '1.0.0'])
   })
 
+  test('a run on a new source branch keeps the Branch Version folder the old branch published', () => {
+    const source = makeSource(world)
+    releaseCommit(
+      source,
+      { ...featureFiles('alpha'), ...entriesFile([releaseEntry({ publishSourceBranch: true })]) },
+      'alpha-v1.0.0',
+      DATE,
+    )
+    expect(runReconcile(world, source).status).toBe(0)
+    const branch = readTree(readRemote(world), `${FEATURES_AREA}/alpha/main`)
+
+    // The folder was built from main, and prune decides when it retires: the shared files of the Area keep it.
+    const run = runPublisher(cloneDocs(world), {
+      source: cloneSource(world, source, 'checkout-develop'), reconcile: true, sourceBranch: 'develop',
+    })
+
+    expect(run.status).toBe(0)
+    expect(readTree(readRemote(world), `${FEATURES_AREA}/alpha/main`)).toEqual(branch)
+  })
+
   test('a package that leaves the repo goes with its branch folder', () => {
     const source = makeSource(world)
     releaseCommit(
