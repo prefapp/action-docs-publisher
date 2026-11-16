@@ -25,7 +25,8 @@ jobs:
         with:
           fetch-depth: 0                 # the publisher reads tags and history
           persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha }}   # empty outside pull requests
+          # A pull request reads its head; every other run reads the source branch, never a tag's contents.
+          ref: ${{ github.event.pull_request.head.sha || 'main' }}
       - id: token
         uses: actions/create-github-app-token@v3
         with:
