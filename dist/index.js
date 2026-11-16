@@ -31976,6 +31976,54 @@ function nestedRepoPath(value) {
 function entriesPath(source, entries) {
   return path.relative(source, entries).split(path.sep).join("/");
 }
+var MAX_LINK_HOPS = 40;
+function entriesNames(source, entries) {
+  const names = /* @__PURE__ */ new Set([entriesPath(source, entries)]);
+  const pending = entriesPath(source, entries).split("/");
+  const resolved = [];
+  let hops = 0;
+  while (pending.length > 0) {
+    const part = pending.shift();
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      if (resolved.length === 0) return [...names];
+      resolved.pop();
+      continue;
+    }
+    resolved.push(part);
+    const from = resolved.join("/");
+    let link;
+    try {
+      link = fs3.readlinkSync(path.join(source, from));
+    } catch {
+      continue;
+    }
+    names.add(from);
+    if (++hops > MAX_LINK_HOPS) return [...names];
+    const target = linkTarget(source, link);
+    if (target === null) return [...names];
+    pending.unshift(...target.parts);
+    if (target.atRoot) resolved.length = 0;
+    else resolved.pop();
+  }
+  if (resolved.length > 0) names.add(resolved.join("/"));
+  return [...names];
+}
+function linkTarget(source, link) {
+  if (!path.isAbsolute(link)) return { atRoot: false, parts: link.split(path.sep).join("/").split("/") };
+  try {
+    for (const root of [source, fs3.realpathSync(source)]) {
+      const rel = path.relative(root, link).split(path.sep).join("/");
+      if (rel === "") return { atRoot: true, parts: [] };
+      if (!nestedRepoPath(rel).refusal) return { atRoot: true, parts: rel.split("/") };
+    }
+  } catch {
+  }
+  return null;
+}
+function entriesChanged(source, entries, changed) {
+  return entriesNames(source, entries).some((rel) => changed.includes(rel));
+}
 function validateNoGitPath(value, label, fail) {
   if (namesGitPath(value)) fail(`${label} uses ".git", the Git administrative folder`);
 }
@@ -33640,13 +33688,12 @@ function prepareMirrors({ args, repository, root }) {
   }
   syncToBranch(args.docs, args.branch);
   const sourceRevision = git(args.source, ["rev-parse", "HEAD"]);
-  const entriesRel = entriesPath(args.source, args.entries);
   const isPush = args.before !== void 0 || args.after !== void 0;
   const matched = mirrors.filter((entry) => {
     const previous = markerRecordAt(args.docs, root, path8.posix.join(root, entry.area));
     assertMarkerOwner(previous, entry.area, repository);
     const touched = isPush && previous?.sourceBranch === args["source-branch"] ? pushChangedFiles(args.source, previous.sourceRevision, sourceRevision) : null;
-    return touched === null || touched.includes(entriesRel) || matchesPush(entry, touched);
+    return touched === null || entriesChanged(args.source, args.entries, touched) || matchesPush(entry, touched);
   });
   for (const entry of mirrors) {
     if (!matched.includes(entry)) {
@@ -34334,10 +34381,9 @@ function planReconcile({ args, repository, root }) {
   const problems = [];
   try {
     const entries = readEntries(args.entries, args["source-branch"]);
-    const entriesRel = entriesPath(args.source, args.entries);
     const changed = git(args.source, ["diff", "--no-renames", "--name-only", "-z", `${args.before}...${args.after}`]).split("\0").filter(Boolean);
     const packages = entries.filter((entry) => entry.mode === "release" && entry.packages !== void 0).map((entry) => path10.posix.normalize(entry.packages).replace(/\/$/, ""));
-    if (!changed.includes(entriesRel) && !packages.some((folder) => changed.some((file) => folder === "." || file.startsWith(`${folder}/`)))) {
+    if (!entriesChanged(args.source, args.entries, changed) && !packages.some((folder) => changed.some((file) => folder === "." || file.startsWith(`${folder}/`)))) {
       writeSummary("Skipped plan: no changed entries file or release package folder.");
       writeIrrelevantPlan(args["plan-file"]);
       return { changed: false, commitSha: null };
@@ -34412,7 +34458,7 @@ function publish(args, mode) {
   if (mode.kind !== "push") throw new FatalError(`unknown run mode: ${mode.kind}`);
   if (run.before !== void 0 || run.after !== void 0) {
     const changed = pushChangedFiles(run.source, run.before, run.after);
-    if (changed === null || changed.includes(entriesPath(run.source, run.entries))) {
+    if (changed === null || entriesChanged(run.source, run.entries, changed)) {
       return { output: "reconcile", ...publishReconcile({ args: run, repository, root }) };
     }
   }

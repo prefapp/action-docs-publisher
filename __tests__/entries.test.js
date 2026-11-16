@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from '@jest/globals'
 import { join } from 'node:path'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import {
   ENTRIES_PATH,
@@ -26,7 +26,7 @@ import {
   renderedScript,
 } from '../test/harness.mjs'
 
-const { readEntries, specHash } = await import(renderedScript('entries.mjs'))
+const { entriesChanged, readEntries, specHash } = await import(renderedScript('entries.mjs'))
 
 const TAG = 'docs_publisher-v1.0.0'
 const DATE = '2026-01-02T03:04:05Z'
@@ -503,6 +503,98 @@ describe('reading the rendered entries', () => {
       publishWith([releaseEntry({ collect: [{ from: 'CHANGELOG.md', to: 'CHANGELOG.md', extra: 1 }] })], RELEASE),
       'entry 1 (area "features"): collect rule must have only from and to',
     )
+  })
+})
+
+// Git names the entries file by the path it is committed at, and by the path of every file a link in the chain points
+// at, so a changed-file list from a push range or a plan has to match any of them.
+describe('changed files that reach the entries file through links', () => {
+  test('matches an intermediate link retargeted inside the checkout', () => {
+    const source = join(world.base, 'link-chain')
+    mkdirSync(join(source, '.github'), { recursive: true })
+    mkdirSync(join(source, 'configs'))
+    writeFileSync(join(source, 'configs/a.yaml'), '[]\n')
+    writeFileSync(join(source, 'configs/b.yaml'), '[]\n')
+    // The entries file points at another link, which git records as a file of its own.
+    symlinkSync('../current.yaml', join(source, ENTRIES_PATH))
+    symlinkSync('configs/a.yaml', join(source, 'current.yaml'))
+    const entries = join(source, ENTRIES_PATH)
+    expect(entriesChanged(source, entries, ['configs/a.yaml'])).toBe(true)
+
+    // Retargeting only the intermediate link changes which configuration the run publishes, so the entries file
+    // changed even though its own path and the link's final target are untouched by that commit.
+    unlinkSync(join(source, 'current.yaml'))
+    symlinkSync('configs/b.yaml', join(source, 'current.yaml'))
+
+    expect(entriesChanged(source, entries, ['current.yaml'])).toBe(true)
+    expect(entriesChanged(source, entries, ['configs/b.yaml'])).toBe(true)
+    // The link no longer names the file it left behind.
+    expect(entriesChanged(source, entries, ['configs/a.yaml'])).toBe(false)
+  })
+
+  test('matches a file edited behind a link folder', () => {
+    const source = join(world.base, 'link-folder')
+    mkdirSync(join(source, '.github'), { recursive: true })
+    mkdirSync(join(source, 'configs'))
+    writeFileSync(join(source, 'configs/publisher.yaml'), '[]\n')
+    // One link on the chain is a folder, which git records as a link of its own.
+    symlinkSync('../current/publisher.yaml', join(source, ENTRIES_PATH))
+    symlinkSync('configs', join(source, 'current'))
+    const entries = join(source, ENTRIES_PATH)
+
+    expect(entriesChanged(source, entries, ['configs/publisher.yaml'])).toBe(true)
+    // Retargeting the link folder changes which configuration the run publishes.
+    expect(entriesChanged(source, entries, ['current'])).toBe(true)
+    expect(entriesChanged(source, entries, ['configs/other.yaml'])).toBe(false)
+  })
+
+  test('matches a file edited behind a link that leads back to its own folder', () => {
+    const source = join(world.base, 'link-revisit')
+    mkdirSync(join(source, '.github'), { recursive: true })
+    writeFileSync(join(source, 'publisher.yaml'), '[]\n')
+    // `current` names the folder that holds it, so the chain meets the link again with a shorter path and still ends.
+    symlinkSync('../current/current/publisher.yaml', join(source, ENTRIES_PATH))
+    symlinkSync('.', join(source, 'current'))
+
+    expect(entriesChanged(source, join(source, ENTRIES_PATH), ['publisher.yaml'])).toBe(true)
+    expect(entriesChanged(source, join(source, ENTRIES_PATH), ['current'])).toBe(true)
+  })
+
+  test('matches a folder link that names the checkout root itself', () => {
+    const source = join(world.base, 'link-root')
+    mkdirSync(join(source, '.github'), { recursive: true })
+    writeFileSync(join(source, 'publisher.yaml'), '[]\n')
+    // An absolute target at the checkout root leaves nothing to resolve before the rest of the path.
+    symlinkSync(source, join(source, 'current'))
+    symlinkSync('../current/publisher.yaml', join(source, ENTRIES_PATH))
+
+    expect(entriesChanged(source, join(source, ENTRIES_PATH), ['publisher.yaml'])).toBe(true)
+    expect(entriesChanged(source, join(source, ENTRIES_PATH), ['current'])).toBe(true)
+  })
+
+  test('matches a path whose `..` crosses a folder link', () => {
+    const source = join(world.base, 'link-dotdot')
+    mkdirSync(join(source, '.github'), { recursive: true })
+    mkdirSync(join(source, 'configs/nested'), { recursive: true })
+    writeFileSync(join(source, 'configs/publisher.yaml'), '[]\n')
+    writeFileSync(join(source, 'publisher.yaml'), '[]\n')
+    // `..` after the link applies to the folder the link resolves to, not to the folder the link sits in.
+    symlinkSync('configs/nested', join(source, 'current'))
+    symlinkSync('../current/../publisher.yaml', join(source, ENTRIES_PATH))
+
+    expect(entriesChanged(source, join(source, ENTRIES_PATH), ['configs/publisher.yaml'])).toBe(true)
+    expect(entriesChanged(source, join(source, ENTRIES_PATH), ['publisher.yaml'])).toBe(false)
+  })
+
+  test('matches a target whose name starts with two dots', () => {
+    const source = join(world.base, 'dotted-target')
+    mkdirSync(join(source, '.github'), { recursive: true })
+    writeFileSync(join(source, '..publisher.yaml'), '[]\n')
+    // `..publisher.yaml` is a file at the repo root, not a path that climbs out of the checkout.
+    symlinkSync('../..publisher.yaml', join(source, ENTRIES_PATH))
+
+    expect(entriesChanged(source, join(source, ENTRIES_PATH), ['..publisher.yaml'])).toBe(true)
+    expect(entriesChanged(source, join(source, ENTRIES_PATH), ['publisher.yaml'])).toBe(false)
   })
 })
 

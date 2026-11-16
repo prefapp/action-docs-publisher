@@ -1,5 +1,5 @@
 import { FatalError, assertBranchName, namesGitPath, writeSummary } from './files.mjs'
-import { TAG_PATTERN, UNNAMED_TAG_PATTERN, entriesPath, nestedRepoPath, readEntries } from './entries.mjs'
+import { TAG_PATTERN, UNNAMED_TAG_PATTERN, entriesChanged, nestedRepoPath, readEntries } from './entries.mjs'
 import { publishReconcile } from './reconcile.mjs'
 import { publishPushUpdates, pushChangedFiles } from './mirror.mjs'
 import { publishRelease } from './release.mjs'
@@ -70,7 +70,7 @@ export function publish(args, mode) {
   if (mode.kind !== 'push') throw new FatalError(`unknown run mode: ${mode.kind}`)
   if (run.before !== undefined || run.after !== undefined) {
     const changed = pushChangedFiles(run.source, run.before, run.after)
-    if (changed === null || changed.includes(entriesPath(run.source, run.entries))) {
+    if (changed === null || entriesChanged(run.source, run.entries, changed)) {
       return { output: 'reconcile', ...publishReconcile({ args: run, repository, root }) }
     }
   }

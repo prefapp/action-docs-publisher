@@ -68,6 +68,77 @@ export function entriesPath(source, entries) {
   return path.relative(source, entries).split(path.sep).join('/')
 }
 
+// A chain longer than this cannot be resolved: the kernel gives up on link expansion at 40 hops too.
+const MAX_LINK_HOPS = 40
+
+// Git names a symlinked entries file more than once: every link in the chain is committed as a link, and every file the
+// chain points through is committed under its own path, so a retargeted link, or an edit behind a link folder, is a
+// change to the entries file even though its final target keeps its path. The names are read from the checkout, so
+// neither a symlinked workspace nor a relative input changes the name git recorded, and a chain that leaves the repo
+// matches no repo-relative changed path.
+function entriesNames(source, entries) {
+  const names = new Set([entriesPath(source, entries)])
+  // Resolve the way the OS does: consume one component at a time from the checkout root, and on a link splice its
+  // target in front of the components still pending, so `..` applies to what is already resolved and not to the text
+  // in front of it. Every link on the chain is committed as a file of its own, and the file the chain reaches is
+  // committed under its own path, so any of them can name a change to the entries file.
+  const pending = entriesPath(source, entries).split('/')
+  const resolved = []
+  let hops = 0
+  while (pending.length > 0) {
+    const part = pending.shift()
+    if (part === '' || part === '.') continue
+    // A `..` at the root names a folder outside the checkout: the chain leaves it and names nothing more.
+    if (part === '..') {
+      if (resolved.length === 0) return [...names]
+      resolved.pop()
+      continue
+    }
+    resolved.push(part)
+    const from = resolved.join('/')
+    let link
+    try {
+      link = fs.readlinkSync(path.join(source, from))
+    } catch {
+      continue // An ordinary file or folder, or a missing one the caller that reads it refuses.
+    }
+    names.add(from)
+    if (++hops > MAX_LINK_HOPS) return [...names]
+    const target = linkTarget(source, link)
+    // A chain that leaves the checkout names the links up to the one that leaves, and nothing beyond it.
+    if (target === null) return [...names]
+    pending.unshift(...target.parts)
+    // The link is replaced by its target: an absolute one restarts at the root, a relative one at the link's folder.
+    if (target.atRoot) resolved.length = 0
+    else resolved.pop()
+  }
+  // The file the chain reaches.
+  if (resolved.length > 0) names.add(resolved.join('/'))
+  return [...names]
+}
+
+// A link target as the components the walk resolves next, or null when it names nothing inside the checkout. A
+// relative target starts at the folder holding the link, so its `..` segments are applied only as the walk reaches
+// them. The checkout is tried by the path the action holds and by its real path, so a symlinked workspace reads its
+// links the repo's way; the root itself is a valid folder target, and so splices in no components.
+function linkTarget(source, link) {
+  if (!path.isAbsolute(link)) return { atRoot: false, parts: link.split(path.sep).join('/').split('/') }
+  try {
+    for (const root of [source, fs.realpathSync(source)]) {
+      const rel = path.relative(root, link).split(path.sep).join('/')
+      if (rel === '') return { atRoot: true, parts: [] }
+      if (!nestedRepoPath(rel).refusal) return { atRoot: true, parts: rel.split('/') }
+    }
+  } catch {
+    // A checkout that cannot be resolved names nothing more than the link itself.
+  }
+  return null
+}
+
+export function entriesChanged(source, entries, changed) {
+  return entriesNames(source, entries).some((rel) => changed.includes(rel))
+}
+
 function validateNoGitPath(value, label, fail) {
   if (namesGitPath(value)) fail(`${label} uses ".git", the Git administrative folder`)
 }

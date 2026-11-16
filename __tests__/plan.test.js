@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from '@jest/globals'
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
-import { ENTRIES_PATH, cloneDocs, cloneSource, commitSource, entriesFile, featureFiles, git, makeDocsRemote, makeSource, readFile, readRemote, releaseCommit, releaseEntry, runPublisher, seedDocs, meta, mirrorEntry, mirrorMeta } from '../test/harness.mjs'
+import { ENTRIES_PATH, cloneDocs, cloneSource, commitSource, entriesFile, entriesJson, featureFiles, git, makeDocsRemote, makeSource, readFile, readRemote, releaseCommit, releaseEntry, runPublisher, seedDocs, meta, mirrorEntry, mirrorMeta } from '../test/harness.mjs'
 
 let world
 beforeEach(() => { world = makeDocsRemote() })
@@ -153,6 +153,22 @@ describe('pull request plans', () => {
     commitSource(source, entriesFile([releaseEntry()], entriesPath), 'custom entries file')
 
     const run = plan(source, before, { entries: entriesPath })
+
+    expect(run.status).toBe(0)
+    expect(run.body).toContain('- Add version `alpha/1.0.0`.')
+    expect(run.summary).not.toContain('Skipped plan')
+  })
+
+  test('plans when only the target of a symlinked entries file changed', () => {
+    const source = makeSource(world)
+    // The entries file is a link to the repo's own publisher.yaml, so git records its edits as `publisher.yaml`.
+    mkdirSync(join(source, '.github'), { recursive: true })
+    symlinkSync('../publisher.yaml', join(source, ENTRIES_PATH))
+    releaseCommit(source, { ...featureFiles('alpha'), 'publisher.yaml': '[]\n' }, 'alpha-v1.0.0', DATE)
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'publisher.yaml': entriesJson([releaseEntry()]) }, 'entries through the link')
+
+    const run = plan(source, before, { entries: ENTRIES_PATH })
 
     expect(run.status).toBe(0)
     expect(run.body).toContain('- Add version `alpha/1.0.0`.')

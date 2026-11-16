@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { entriesPath, readEntries } from './entries.mjs'
+import { entriesChanged, entriesPath, readEntries } from './entries.mjs'
 import {
   FatalError,
   TagContentError,
@@ -222,11 +222,10 @@ export function planReconcile({ args, repository, root }) {
     // The entries file is read here, so a file that is not valid YAML is a planning problem the comment reports,
     // not a failure before plan mode: no other mode reaches the docs repo without a valid file.
     const entries = readEntries(args.entries, args['source-branch'])
-    const entriesRel = entriesPath(args.source, args.entries)
     const changed = git(args.source, ['diff', '--no-renames', '--name-only', '-z', `${args.before}...${args.after}`]).split('\0').filter(Boolean)
     const packages = entries.filter((entry) => entry.mode === 'release' && entry.packages !== undefined)
       .map((entry) => path.posix.normalize(entry.packages).replace(/\/$/, ''))
-    if (!changed.includes(entriesRel) && !packages.some((folder) => changed.some((file) => folder === '.' || file.startsWith(`${folder}/`)))) {
+    if (!entriesChanged(args.source, args.entries, changed) && !packages.some((folder) => changed.some((file) => folder === '.' || file.startsWith(`${folder}/`)))) {
       writeSummary('Skipped plan: no changed entries file or release package folder.')
       writeIrrelevantPlan(args['plan-file'])
       return { changed: false, commitSha: null }

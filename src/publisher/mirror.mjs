@@ -1,7 +1,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { entriesPath, readEntries } from './entries.mjs'
+import { entriesChanged, readEntries } from './entries.mjs'
 import {
   assertAreaWritable,
   FatalError,
@@ -169,14 +169,13 @@ export function prepareMirrors({ args, repository, root }) {
   }
   syncToBranch(args.docs, args.branch)
   const sourceRevision = git(args.source, ['rev-parse', 'HEAD'])
-  const entriesRel = entriesPath(args.source, args.entries)
   const isPush = args.before !== undefined || args.after !== undefined
   const matched = mirrors.filter((entry) => {
     const previous = markerRecordAt(args.docs, root, path.posix.join(root, entry.area))
     assertMarkerOwner(previous, entry.area, repository)
     const touched = isPush && previous?.sourceBranch === args['source-branch']
       ? pushChangedFiles(args.source, previous.sourceRevision, sourceRevision) : null
-    return touched === null || touched.includes(entriesRel) || matchesPush(entry, touched)
+    return touched === null || entriesChanged(args.source, args.entries, touched) || matchesPush(entry, touched)
   })
   for (const entry of mirrors) {
     if (!matched.includes(entry)) {

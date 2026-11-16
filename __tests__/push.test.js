@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from '@jest/globals'
 import { chmodSync, mkdirSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  ENTRIES_PATH,
   cloneDocs,
   cloneSource,
   commitSource,
   entriesFile,
+  entriesJson,
   exists,
   featureFiles,
   git,
@@ -376,6 +378,26 @@ describe('push reconciliation', () => {
     const run = runPublisher(cloneDocs(world, 'custom-entries-docs'), {
       source: checkout, entries: join(checkout, entriesPath), before, after,
     })
+
+    expect(run.status).toBe(0)
+    expect(remoteCommitCount(world)).toBe(commits + 1)
+    // A push publishes no Version folder; the reconcile an entries-file change escalates to publishes it.
+    expect(exists(readRemote(world), 'site/raw/features/alpha/1.0.0/.meta.json')).toBe(true)
+  })
+
+  test('escalates when a symlinked entries file changes at its target', () => {
+    const source = makeSource(world)
+    // The entries file is a link to the repo's own publisher.yaml, so git records its edits as `publisher.yaml`.
+    mkdirSync(join(source, '.github'), { recursive: true })
+    symlinkSync('../publisher.yaml', join(source, ENTRIES_PATH))
+    releaseCommit(source, { ...featureFiles('alpha'), 'publisher.yaml': '[]\n' }, 'alpha-v1.0.0', DATE)
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'publisher.yaml': entriesJson([releaseEntry()]) }, 'entries through the link')
+    const after = git(source, 'rev-parse', 'HEAD')
+    const checkout = cloneSource(world, source, 'symlinked-entries-push')
+    const commits = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world, 'symlinked-entries-docs'), { source: checkout, before, after })
 
     expect(run.status).toBe(0)
     expect(remoteCommitCount(world)).toBe(commits + 1)

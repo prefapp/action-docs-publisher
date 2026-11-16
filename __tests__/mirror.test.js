@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import {
+  ENTRIES_PATH,
   cloneDocs,
   cloneSource,
   commitSource,
@@ -798,6 +799,31 @@ describe('matching the push against paths', () => {
     expect(run.summary).toContain('Skipped mirror `core/docs`')
     expect(run.summary).toContain('No mirror entry matches this push.')
     expect(remoteCommitCount(world)).toBe(commits)
+  })
+
+  test('republishes a mirror when only the target of a symlinked entries file changed', () => {
+    const source = makeSource(world)
+    // The entries file is a link to the repo's own publisher.yaml, so git records its edits as `publisher.yaml`.
+    mkdirSync(join(source, '.github'), { recursive: true })
+    symlinkSync('../publisher.yaml', join(source, ENTRIES_PATH))
+    commitSource(source, {
+      'docs/index.md': '# Core\n',
+      'publisher.yaml': JSON.stringify([mirrorEntry()], null, 2),
+    }, 'before')
+    expect(runPublisher(cloneDocs(world, 'link-seed'), { source }).status).toBe(0)
+    const before = git(source, 'rev-parse', 'HEAD')
+    // The link path is untouched, and the changed target matches no watch path: only the entries it holds changed.
+    commitSource(source, {
+      'publisher.yaml': JSON.stringify([mirrorEntry({ collect: [{ from: 'docs/**', to: 'guide' }] })], null, 2),
+    }, 'move the mirrored content')
+    const after = git(source, 'rev-parse', 'HEAD')
+
+    const run = runPublisher(cloneDocs(world, 'link-push'), { source, before, after })
+
+    expect(run.status).toBe(0)
+    const landed = readRemote(world)
+    expect(readFile(landed, `${CORE_DOCS}/guide/index.md`)).toBe('# Core\n')
+    expect(exists(landed, `${CORE_DOCS}/index.md`)).toBe(false)
   })
 
   test.each(['ancestor', 'newer', 'unrelated'])('republishes unchanged paths after a branch switch when the published revision is %s', (relation) => {
