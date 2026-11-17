@@ -1,0 +1,48 @@
+name: Docs publisher
+description: Publish a repository's docs into the docs repo, and plan the changes a pull request would make
+author: Prefapp
+
+# The job that installs this action checks the source repository out at the workspace root, and does not check the
+# docs repo out at all: the action clones the docs repo itself, outside the workspace, and holds both tokens in
+# memory. See README.md for what each mode does.
+inputs:
+  docs-repository:
+    description: The docs repo, as `org/repo`
+    required: true
+  docs-root-folder:
+    description: The folder of the docs repo this repository's Areas live under, such as `site/raw`, or `.` for the top of the repo
+    required: true
+  docs-branch:
+    description: The branch of the docs repo to publish to
+    required: false
+    default: main
+  source-branch:
+    description: The branch of this repository whose pushes republish its mirrors and Branch Version folders
+    required: false
+    default: main
+  entries-file:
+    description: The entries file, relative to the checked-out source repository
+    required: false
+    default: .github/docs_publisher.yaml
+  docs-token:
+    description: A token that can push to the docs repo. The commits are authored by the account it belongs to.
+    required: true
+  github-token:
+    description: A token for this repository, used to fetch from it and to comment the plan on a pull request
+    required: true
+
+outputs:
+  run-mode:
+    description: What this run did. One of `release`, `push`, `reconcile`, `plan` or `skipped`
+  docs-changed:
+    description: '"true" when this run pushed a commit to the docs repo, "false" otherwise. A plan never pushes.'
+  docs-commit-sha:
+    description: The commit this run pushed to the docs repo, when it pushed one
+
+runs:
+  using: node24
+  main: dist/index.js
+
+branding:
+  icon: book-open
+  color: blue
