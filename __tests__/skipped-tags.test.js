@@ -239,6 +239,32 @@ describe('a recorded skip is only reused while its conditions hold', () => {
     expect(exists(landed, SKIPPED)).toBe(false)
   })
 
+  test('re-checks a retired tag that moved onto another commit', () => {
+    const source = makeSource(world)
+    releaseCommit(
+      source,
+      { ...featureFiles('alpha'), ...packageFolder('gone'), ...entriesFile([releaseEntry()]) },
+      'gone-v1.0.0',
+      DATE,
+    )
+    commitSource(source, { 'packages/gone': null }, 'retire the gone package')
+    expect(runReconcile(world, source).status).toBe(0)
+    expect(readJson(readRemote(world), SKIPPED).tags['gone-v1.0.0'].reason).toBe('retired')
+    // The tag moves onto the commit that retired the package: its recorded commit is no longer the one it names.
+    git(source, 'tag', '-f', 'gone-v1.0.0')
+    const moved = revision(source, 'gone-v1.0.0')
+    const commits = remoteCommitCount(world)
+
+    const run = runReconcile(world, source)
+
+    expect(run.status).toBe(0)
+    expect(remoteCommitCount(world)).toBe(commits + 1)
+    expect(readJson(readRemote(world), SKIPPED).tags['gone-v1.0.0']).toEqual({ sourceRevision: moved, reason: 'retired' })
+    // The skip is derived again, not reused: the run names it instead of counting it.
+    expect(run.summary).toContain('- Skipped `gone-v1.0.0`: the package folder is gone from `main`, so the package is retired.')
+    expect(run.summary).not.toContain('previously skipped')
+  })
+
   test('publishes a recorded retirement once the package folder is back', () => {
     const source = makeSource(world)
     releaseCommit(
