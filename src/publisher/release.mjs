@@ -64,8 +64,6 @@ function collectPackage({ source, entry, name, dir, marker }) {
   return files
 }
 
-// A tag's Version folder, built from the target the Version folder targeting module resolved: this module decides the
-// bytes and the marker, not where the folder goes.
 export function planVersion({ source, entry, target, repository, date, tag, sourceRevision }) {
   const files = collectPackage({
     source, entry, name: target.name, dir: target.versionDir,
@@ -173,10 +171,6 @@ export function publishRelease({ args, release, repository, root }) {
   ))
 }
 
-// A Version folder the docs hold for a tag whose package folder the tag itself no longer carries. A marker that names
-// this run's commit is the tag's own bytes, so the Version stays as it is whatever the entry names today. A marker
-// built from another commit, or a legacy marker that names none, is a Version the tag can no longer produce, and the
-// run stops over it. Only this tag's Version counts: another tag's folder is not this run's to keep.
 function missingTagVersions({ docs, root, repository, tag, sourceRevision, missing }) {
   const kept = []
   const moved = []
@@ -189,16 +183,11 @@ function missingTagVersions({ docs, root, repository, tag, sourceRevision, missi
   return { kept, moved }
 }
 
-// A Version the tag can no longer produce has nothing in the tag that could replace it, so the Release stops over the
-// bytes the docs hold instead of reporting a skip.
 function movedTagProblems(tag, moved) {
   return [...new Set(moved.map(({ entry, name, versionDir }) =>
     `refusing to publish \`${tag}\` over \`${versionDir}\`: the tag points at a commit without the \`${entry.packages}/${name}\` folder, and the docs hold its Version. Its bytes are kept.`))]
 }
 
-// The Area state a Release reads before it decides anything: the Skipped tags file it takes the tag out of, in every
-// Area the tag could publish into. A damaged one fails the run here, whatever the run would do with the Area, so a
-// reported skip or a dropped prerelease never hides it.
 function releaseStateProblems({ docs, root, entries }) {
   const problems = []
   for (const entry of entries) {
@@ -210,9 +199,6 @@ function releaseStateProblems({ docs, root, entries }) {
   return problems
 }
 
-// The marker of a Version folder this repo published, or null when the folder is not ours. A release-triggered
-// publish rewrites a Version only when its tag now points at another commit: the bytes readers already link to stay
-// as they are for an unchanged tag, and a Version another tag published is never rewritten.
 function publishedMarker(docs, root, versionDir, repository) {
   const metadata = markerRecordAt(docs, root, versionDir)
   return metadata?.source === repository ? metadata : null
@@ -231,9 +217,6 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
     assertNoSymlinkAncestors(tagSource, folder)
     return lstatOrNull(path.join(tagSource, folder))?.isDirectory() === true
   })
-  // The Areas whose package folder the tag does not hold. Their Version folders, if the docs hold this tag's, stay as
-  // they are; a moved or legacy one stops the run instead. Which Areas keep theirs is read per attempt, from the docs
-  // branch that attempt fetched.
   const missing = candidates.filter((entry) => !releases.includes(entry)).map((entry) => ({
     entry, ...targets.get(entry),
   }))
@@ -245,9 +228,6 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
         : `Skipped \`${args.tag}\` for area \`${entry.area}\`: no \`${entry.packages}/${name}\` folder at the tag.`)
     }
   }
-  // Every path of a Release reads the same state: the Skipped tags files of every candidate Area, and the Version
-  // folders the tag's own package folder cannot replace. It runs after the attempt's docs sync, so an Area another run
-  // just published is read as it is now.
   const readReleaseState = () => {
     keptMissing.clear()
     const problems = releaseStateProblems({ docs: args.docs, root, entries: candidates })
@@ -259,8 +239,6 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
     if (problems.length > 0) throw new FatalError([...new Set(problems)].join('\n'))
   }
   if (releases.length === 0) {
-    // A tag that moved off its package folder leaves the Version the docs already hold with nothing to rebuild it
-    // from, so the run stops instead of reporting a skip over bytes it cannot replace.
     if (missing.length > 0) {
       syncToBranch(args.docs, args.branch)
       readReleaseState()
@@ -272,8 +250,6 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
   }
   const published = releases.filter((entry) => entry.prereleases || !release.prerelease)
   if (published.length === 0) {
-    // The Areas this run publishes no Version into still hold the state a Release answers for: a moved published tag
-    // is a failure even when the filter above leaves nothing to publish.
     syncToBranch(args.docs, args.branch)
     readReleaseState()
     reportMissing()
@@ -308,12 +284,7 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
       // One fetch per attempt, made only once a published Area's Area files need the answer.
       let moved
       const sourceMoved = () => (moved ??= sourceBranchMoved(args.source, args['source-branch']))
-      // The docs record the commit a Version was built from, so the run has to publish that same commit: a clone that
-      // holds an older tag than origin would otherwise roll a newer publish back. Origin is asked on every attempt,
-      // because the tag can move while the run waits to push.
       const onOrigin = originTagRevision(args.source, args.tag)
-      // A tag origin no longer names has no authoritative commit to publish from: the run's own ref may be older than
-      // the one that published the docs, so publishing from it could roll them back.
       if (onOrigin === null) {
         throw new FatalError(
           `refusing to publish \`${args.tag}\`: origin holds no such tag, so this run cannot tell which commit published the docs. Publish the tag again from the commit it names.`,
@@ -330,8 +301,6 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
         if (!(error instanceof FatalError)) throw error
         problems.push(error.message)
       }
-      // A Skipped tags file this repo's own Reconcile wrote has to be readable before the Release takes it away, and a
-      // moved published tag has to stop the run, whatever this attempt decides about the Version folders.
       try { readReleaseState() } catch (error) {
         if (!(error instanceof FatalError)) throw error
         problems.push(error.message)
@@ -378,8 +347,6 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
         fs.rmSync(path.join(args.docs, version.versionDir), { recursive: true, force: true })
         for (const [rel, file] of version.files) writeFile(args.docs, rel, file)
       }
-      // A Release never records a skip. It clears the tag it just published, so a later Reconcile does not check
-      // what the docs already hold, and leaves the file gone when it held nothing else.
       const cleared = plans
         .map(({ area }) => planTagClear({ docs: args.docs, areaDir: area.areaDir, tag: args.tag, repository }))
         .filter(Boolean)

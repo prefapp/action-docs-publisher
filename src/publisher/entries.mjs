@@ -208,14 +208,8 @@ function validatePaths(list, fail) {
   }
 }
 
-// The files the publisher generates at the top of an Area. A run never publishes an Area file over one of them, and
-// no Area, package folder or Branch Version folder may take their name.
-function isSharedFileName(name) {
-  return GENERATED_AREA_NAMES.has(name)
-}
-
 export function isReservedName(name) {
-  return isSharedFileName(name) || name === 'latest' || SEMVER_REGEX.test(name.replace(/^v/, ''))
+  return GENERATED_AREA_NAMES.has(name) || name === 'latest' || SEMVER_REGEX.test(name.replace(/^v/, ''))
 }
 
 function validateAreaFileNames(list, fail, area, unnamed) {
@@ -224,7 +218,7 @@ function validateAreaFileNames(list, fail, area, unnamed) {
       fail(`areaFiles to "${rule.to}" in area "${area}" must be a single file name at the top of the Area`)
     }
     if (GLOB_CHARS.test(rule.from)) fail(`areaFiles from "${rule.from}" in area "${area}" must be one file, not a glob`)
-    if (isSharedFileName(rule.to)) fail(`areaFiles to "${rule.to}" in area "${area}" is one of the publisher's shared files`)
+    if (GENERATED_AREA_NAMES.has(rule.to)) fail(`areaFiles to "${rule.to}" in area "${area}" is one of the publisher's shared files`)
     if (unnamed && rule.to === 'latest') fail(`areaFiles to "${rule.to}" in area "${area}" is the Latest folder the publisher writes`)
   }
 }

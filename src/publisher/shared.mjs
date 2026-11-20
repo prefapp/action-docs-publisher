@@ -109,8 +109,6 @@ export function placementProblems(docs, root, areaDir, versions) {
   for (let dir = areaDir; scope.contains(dir); dir = path.posix.dirname(dir)) {
     const record = read(dir)
     if (record) problems.push(`refusing to publish ${areaDir}: it sits inside a ${labels[record.kind]} at ${dir}`)
-    // A Version folder, a Branch Version folder or a Skipped tags file claims the release Area it sits in, so a
-    // release Area may not sit inside one: the docs mark another Area there.
     if (dir !== areaDir && releaseAreas.has(dir)) {
       problems.push(`refusing to publish ${areaDir}: it sits inside a release Area at ${dir}`)
     }
@@ -136,8 +134,6 @@ export function planSharedArea({ docs, root, entry, repository, branch, docsRepo
   }
   const problems = []
   const records = markerRecords(docs, root, areaDir, (_dir, error) => problems.push(error.message))
-  // The Skipped tags file at the top of the Area claims it for the repo it names, with or without a Version folder.
-  // `placementProblems` has already found a damaged one; this read names the same folder's owner, or the damage.
   let own = null
   try { own = skippedRecordAt(docs, areaDir) } catch (error) {
     if (!(error instanceof FatalError)) throw error
@@ -243,8 +239,6 @@ export function planSharedArea({ docs, root, entry, repository, branch, docsRepo
   if (entry.packages !== undefined) put(files, `${areaDir}/index.json`, metaFile({ [entry.area.split('/').at(-1)]: rows }))
   for (const name of lstatOrNull(path.join(docs, areaDir))?.isDirectory() ? fs.readdirSync(path.join(docs, areaDir)) : []) {
     const rel = `${areaDir}/${name}`
-    // The Skipped tags file belongs to the runs that read it: a rebuild of the shared files never deletes one, and a
-    // run that skips the whole Area keeps the docs copy.
     if (name === SKIPPED_TAGS_FILE) continue
     if (!lstatOrNull(path.join(docs, rel))?.isDirectory() && !files.has(rel)) removals.push(rel)
   }

@@ -32,9 +32,6 @@ export function sourceBranchMoved(source, branch) {
   return tip.stdout.trim() !== git(source, ['rev-parse', 'HEAD'])
 }
 
-// The commit a tag names on origin, or null when origin holds no such tag. A delayed run's clone can hold an older
-// tag than the one that published the docs, so the run asks origin instead of trusting its own ref; a checkout with no
-// origin remote has no other answer than the ref it holds.
 export function originTagRevision(source, tag) {
   const remotes = gitStatus(source, ['remote'])
   const hasOrigin = remotes.status === 0 && remotes.stdout.split('\n').map((name) => name.trim()).includes('origin')

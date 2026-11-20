@@ -156,9 +156,6 @@ export function planPrune({ docs, source, root, repository, entries }) {
       removals.push({ dir: branch.dir, areaDir, kind: 'package-gone', reason: `\`${entry.packages}/${name}\` is gone from the source repo` })
     }
   }
-  // A Release Area the Skipped tags file alone claims has no Version or Branch Version folder to retire it: the file
-  // names the repo that owns the Area, so a retired Area goes with it, its top-level Area files included. A folder
-  // beside the file is not the file's to delete: it stays, and only the top-level files this repo wrote go.
   for (const record of skipped) {
     const { areaDir } = record
     if (releaseAreas.has(areaDir) || retiredAreas.has(areaDir) || !ownedDirs.has(areaDir)) continue
@@ -176,8 +173,6 @@ export function planPrune({ docs, source, root, repository, entries }) {
     ...claims.filter((claim) => isPruned(claim.areaDir)).map((claim) => claim.areaDir),
   ]
   assertRecordOwners(claims, affectedAreas, root, repository)
-  // A damaged marker stops the run when the plan clears its folder. A damaged Skipped tags file stops it when the plan
-  // removes the file, whether it clears the Area or deletes the file with the Area's other top-level files.
   const removed = (damagedClaim) => isPruned(damagedClaim.dir) ||
     (damagedClaim.rel !== undefined && files.some((file) => file.rel === damagedClaim.rel))
   for (const damagedClaim of damaged) {

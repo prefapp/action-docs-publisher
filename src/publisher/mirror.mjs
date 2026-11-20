@@ -39,9 +39,6 @@ import { planBranchVersions, rebuildPackages } from './release.mjs'
 import { discoverAreas } from './discovery.mjs'
 import { placementProblems, planSharedArea, snapshotAreaState, writeSharedArea } from './shared.mjs'
 import { skippedRecordAt } from './skipped.mjs'
-
-// A Mirror Area is owned by every marker its folder holds, and a Skipped tags file claims the folder as an Area just
-// as a `.meta.json` does: one that names another repo is refused before the mirror clears the folder.
 function assertAreaOwner(docs, root, dir, area, repository) {
   const marker = markerRecordAt(docs, root, dir)
   assertMarkerOwner(marker, area, repository)
@@ -123,14 +120,9 @@ export function planMirrorWrites({ args, repository, mirrors, releaseFiles = new
   // Branch Version folder is the same evidence when the Area holds no Version folder yet, and its marker names the
   // Area, so the layout never has to be guessed.
   const discovered = discoverAreas(docs, args.root)
-  // A `.skipped-tags.json` this run publishes is content, not an Area claim: the publisher reserves the name at the top
-  // of a Release Area, and a Mirror Area publishes content, so a mirror that carries such a file keeps refreshing
-  // itself. Only a claim outside the content planned here counts as the evidence of a release Area.
-  const contentPaths = new Set(plannedFiles.keys())
-  for (const area of writable) for (const rel of area.destinations ?? []) contentPaths.add(rel)
-  // A Version or Branch Version folder proves its Area, and so does a Skipped tags file outside the content above, so
-  // a Mirror Area that is one of those Areas, or sits inside one, stops here.
-  const releaseAreas = [...discovered.releaseAreas({ content: contentPaths })]
+  const publishedContent = new Set(plannedFiles.keys())
+  for (const area of writable) for (const rel of area.destinations ?? []) publishedContent.add(rel)
+  const releaseAreas = [...discovered.releaseAreas({ content: publishedContent })]
   const branches = discovered.claims.filter((claim) => claim.kind === 'Branch')
   for (const area of writable) {
     const plannedVersion = [...releaseFiles].find(([rel, file]) =>
@@ -158,9 +150,6 @@ export function planMirrorWrites({ args, repository, mirrors, releaseFiles = new
         `refusing to publish ${area.areaDir}: it sits inside the release Area ${releaseArea}, and a Mirror Area cannot sit inside a release Area. Choose another Area.`,
       )
     }
-    // A Skipped tags file claims its folder as a release Area without any Version folder, and a mirror replaces its
-    // Area whole: one that is that Area, or that holds it, would clear the file and the Area's own files too. The
-    // claims are read after Prune, so an Area a retired entry just freed is not one of them.
     const claimedArea = releaseAreas.find((dir) => dir === area.areaDir)
     if (claimedArea !== undefined) {
       throw new FatalError(
@@ -173,10 +162,7 @@ export function planMirrorWrites({ args, repository, mirrors, releaseFiles = new
         `refusing to publish ${area.areaDir}: it holds the release Area ${heldArea}, and a Mirror Area cannot sit inside a release Area. Choose another Area.`,
       )
     }
-    // A damaged record inside the tree the mirror clears is refused here: the clear would delete the only copy of
-    // what the record says about the Area it marks. A damaged file the mirror itself publishes is content, like any
-    // other file it writes.
-    const damaged = discovered.damaged.find((entry) => !contentPaths.has(entry.rel) &&
+    const damaged = discovered.damaged.find((entry) => !publishedContent.has(entry.rel) &&
       (entry.dir === area.areaDir || entry.dir.startsWith(`${area.areaDir}/`)))
     if (damaged !== undefined) throw new FatalError(`refusing to publish ${area.areaDir}: ${damaged.message}`)
     // A mirror replaces its Area as a whole, so a folder with no marker anywhere in it is refused rather than cleared.

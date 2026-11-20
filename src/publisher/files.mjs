@@ -251,8 +251,6 @@ export function groupBy(items, keyFor) {
 }
 
 export function assertCollectable(rel, from, versionDir, areaDir) {
-  // The Skipped tags file sits at the top of an Area, and a rewrite of it would leave the Area's recorded skips to a
-  // collect rule.
   if (areaDir !== undefined && rel === path.posix.join(areaDir, SKIPPED_TAGS_FILE)) {
     throw new FatalError(`collect from "${from}" would publish ${rel}: ${SKIPPED_TAGS_FILE} is the publisher's Skipped tags file`)
   }
@@ -535,9 +533,6 @@ export function areaFileProblemsSummary(areaDir, problem) {
   writeSummary(`Kept the Area files of \`${areaDir}\`: ${problem}; run a manual run to repair it.`)
 }
 
-// True when a folder holds a `.meta.json`, or a Skipped tags file, anywhere below it: an Area, a Version folder, a
-// nested Area, or a Release Area the Skipped tags file alone claims. It is the evidence that a source repo published
-// there, whatever the record says.
 function holdsMarker(docs, dir) {
   const walk = (rel) => {
     for (const name of fs.readdirSync(path.join(docs, rel)).sort()) {
@@ -624,7 +619,6 @@ export function tagExists(source, tag) {
   return tagCommit(source, tag) !== null
 }
 
-// The commit a tag points at. A caller that has to tell a missing tag from a moved one reads `tagCommit` instead.
 export function tagRevision(source, tag) {
   return git(source, ['rev-parse', '--verify', `refs/tags/${tag}^{commit}`])
 }
