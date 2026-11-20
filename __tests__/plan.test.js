@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from '@jest/globals'
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
-import { ENTRIES_PATH, cloneDocs, cloneSource, commitSource, entriesFile, entriesJson, featureFiles, git, makeDocsRemote, makeSource, readFile, readRemote, releaseCommit, releaseEntry, runPublisher, seedDocs, meta, mirrorEntry, mirrorMeta } from '../test/harness.mjs'
+import { pathToFileURL } from 'node:url'
+import { ENTRIES_PATH, cloneDocs, cloneSource, commitSource, entriesFile, entriesJson, featureFiles, git, makeDocsRemote, makeSource, readFile, readJson, readRemote, releaseCommit, releaseEntry, renderedScript, runPublisher, seedDocs, meta, mirrorEntry, mirrorMeta } from '../test/harness.mjs'
+
+const { specHash } = await import(pathToFileURL(renderedScript('entries.mjs')).href)
 
 let world
 beforeEach(() => { world = makeDocsRemote() })
@@ -536,6 +539,41 @@ describe('pull request plans', () => {
     expect(run.body).toContain('- Republish version `alpha/1.0.0`: specHash changed.')
     expect(run.body).not.toContain('would fail to publish')
   })
+  test('lists a version whose tag moved for republishing without writing to the docs repo', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    expect(runPublisher(cloneDocs(world, 'docs-seed'), { source, tag: 'alpha-v1.0.0' }).status).toBe(0)
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# RETAGGED\n' })
+    git(source, 'tag', '-f', 'alpha-v1.0.0')
+
+    const run = plan(source, before)
+
+    expect(run.status).toBe(0)
+    expect(run.body).toContain('- Republish version `alpha/1.0.0`: its tag points at a different commit.')
+    expect(run.body).not.toContain('specHash changed')
+  })
+
+  test('does not report a legacy marker gaining its tag commit as a change to publish', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    expect(runPublisher(cloneDocs(world, 'docs-seed'), { source, tag: 'alpha-v1.0.0' }).status).toBe(0)
+    // A Version folder from before the publisher recorded the tag's commit.
+    const marker = 'site/raw/features/alpha/1.0.0/.meta.json'
+    const { sourceRevision, ...legacy } = readJson(readRemote(world), marker)
+    expect(sourceRevision).toMatch(/^[a-f0-9]{40}$/)
+    seedDocs(world, { [marker]: meta(legacy) })
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'packages/alpha/templates/docs/sub/deep.md': '# Deep v2\n' })
+
+    const run = plan(source, before)
+
+    expect(run.status).toBe(0)
+    expect(run.body).not.toContain('Republish')
+    expect(run.body).not.toContain('.meta.json')
+    expect(run.body).toContain('No changes to add, republish, delete or replace.')
+  })
+
   test('lists a missing version from a tag without changing the docs checkout or remote', () => {
     const source = makeSource(world)
     commitSource(source, { ...featureFiles('alpha'), ...entriesFile([]) })

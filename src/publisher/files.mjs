@@ -361,6 +361,10 @@ export function readMarkerRecord(bytes, marker, root) {
   if ('tag' in metadata) {
     if (!text('tag') || (metadata.specHash !== undefined &&
         (typeof metadata.specHash !== 'string' || !/^[a-f0-9]{64}$/.test(metadata.specHash)))) invalid()
+    // A Version folder published before the publisher recorded the tag's commit holds no `sourceRevision`: it is a
+    // legacy marker, and the next run stamps it. A marker that names one names the commit, never the tag object.
+    if (metadata.sourceRevision !== undefined &&
+        (typeof metadata.sourceRevision !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(metadata.sourceRevision))) invalid()
     let release
     try { release = matchTag(metadata.tag) } catch { invalid() }
     if (!release || path.posix.basename(dir) !== release.version) invalid()
@@ -631,4 +635,10 @@ export function commitDate(source, revision) {
 
 export function tagExists(source, tag) {
   return gitStatus(source, ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}^{commit}`]).status === 0
+}
+
+// The commit a tag points at. `^{commit}` peels an annotated tag to the commit it names, so a tag recreated or moved
+// to another commit reads as a different revision whatever the tag object around it.
+export function tagRevision(source, tag) {
+  return git(source, ['rev-parse', '--verify', `refs/tags/${tag}^{commit}`])
 }

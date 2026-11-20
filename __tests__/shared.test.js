@@ -169,7 +169,7 @@ describe('release shared files', () => {
     expect(run.status).toBe(0)
     const landed = readRemote(world)
     expect(readJson(landed, 'site/raw/features/alpha/1.0.0/.meta.json')).toEqual({
-      source: 'acme/source', tag: 'alpha-v1.0.0', date: DATE,
+      source: 'acme/source', tag: 'alpha-v1.0.0', sourceRevision: git(source, 'rev-parse', 'HEAD'), date: DATE,
       specHash: expect.stringMatching(/^[a-f0-9]{64}$/),
     })
     expect(readJson(landed, 'site/raw/features/alpha/versions.json')).toEqual([

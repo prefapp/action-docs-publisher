@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from '@jest/globals'
 import { symlinkSync } from 'node:fs'
 import { join } from 'node:path'
-import { cloneDocs, cloneSource, commitSource, entriesFile, exists, featureFiles, git, makeDocsRemote, makeSource, meta, mirrorEntry, pushAttempts, readFile, readJson, readRemote, readTree, rejectPushes, releaseCommit, releaseEntry, remoteCommitCount, runPublisher, runReconcile, seedDocs, tagRelease, unnamedReleaseEntry, write } from '../test/harness.mjs'
+import { pathToFileURL } from 'node:url'
+import { cloneDocs, cloneSource, commitSource, entriesFile, exists, featureFiles, git, makeDocsRemote, makeSource, meta, mirrorEntry, pushAttempts, readFile, readJson, readRemote, readTree, rejectPushes, releaseCommit, releaseEntry, remoteCommitCount, renderedScript, runPublisher, runReconcile, seedDocs, tagRelease, unnamedReleaseEntry, write } from '../test/harness.mjs'
+
+const { specHash } = await import(pathToFileURL(renderedScript('entries.mjs')).href)
 
 let world
 beforeEach(() => { world = makeDocsRemote() })
@@ -23,7 +26,7 @@ describe('manual runs remain compatible with release shared files', () => {
     expect(run.status).toBe(0)
     expect(remoteCommitCount(world)).toBe(before + 1)
     const landed = readRemote(world)
-    expect(readJson(landed, `${AREA}/alpha/1.0.0/.meta.json`)).toEqual({ source: 'acme/source', tag: 'alpha-v1.0.0', date: DATE, specHash: expect.stringMatching(/^[a-f0-9]{64}$/) })
+    expect(readJson(landed, `${AREA}/alpha/1.0.0/.meta.json`)).toEqual({ source: 'acme/source', tag: 'alpha-v1.0.0', sourceRevision: git(source, 'rev-parse', 'refs/tags/alpha-v1.0.0^{commit}'), date: DATE, specHash: expect.stringMatching(/^[a-f0-9]{64}$/) })
     expect(readJson(landed, `${AREA}/alpha/versions.json`).map((row) => row.version)).toEqual(['2.0.0', '1.0.0'])
     expect(readJson(landed, `${AREA}/index.json`).features[0].version).toBe('2.0.0')
     expect(readFile(landed, `${AREA}/alpha/intro.md`)).toBe('# v2\n')
@@ -66,7 +69,7 @@ describe('manual runs remain compatible with release shared files', () => {
     expect(run.summary).toContain(`- Kept \`${AREA}/alpha/1.0.0\`: specHash matches the current entry.`)
   })
 
-  test('reports an unchanged Version folder as kept even if its tag no longer fits the entry', () => {
+  test('keeps a Version folder intact and reports its moved tag as skipped when the tag no longer fits the entry', () => {
     const source = manualSource()
     expect(runReconcile(world, source).status).toBe(0)
     const tree = readTree(readRemote(world), `${AREA}/alpha/1.0.0`)
@@ -77,8 +80,95 @@ describe('manual runs remain compatible with release shared files', () => {
     expect(run.status).toBe(0)
     expect(readTree(readRemote(world), `${AREA}/alpha/1.0.0`)).toEqual(tree)
     expect(remoteCommitCount(world)).toBe(before)
-    expect(run.summary).toContain(`- Kept \`${AREA}/alpha/1.0.0\`: specHash matches the current entry.`)
-    expect(run.summary).not.toContain('Skipped `alpha-v1.0.0`')
+    expect(run.summary).toContain('- Skipped `alpha-v1.0.0`: its content does not fit the entry (not found: schema.json).')
+    expect(run.summary).not.toContain('Republished')
+    expect(run.summary).not.toContain(`- Kept \`${AREA}/alpha/1.0.0\``)
+  })
+
+  test('keeps a Version folder intact and reports a moved tag whose package folder is gone as skipped', () => {
+    const source = makeSource(world)
+    commitSource(source, entriesFile([releaseEntry()]), 'an entry before any package')
+    releaseCommit(source, { ...featureFiles('alpha') }, 'alpha-v1.0.0', DATE)
+    expect(runReconcile(world, source).status).toBe(0)
+    const tree = readTree(readRemote(world), `${AREA}/alpha/1.0.0`)
+    git(source, 'tag', '-f', 'alpha-v1.0.0', 'HEAD~1')
+    const before = remoteCommitCount(world)
+
+    const run = runReconcile(world, source)
+
+    expect(run.status).toBe(0)
+    expect(readTree(readRemote(world), `${AREA}/alpha/1.0.0`)).toEqual(tree)
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(run.summary).toContain('- Skipped `alpha-v1.0.0`: the package folder does not exist at that tag.')
+  })
+
+  test('republishes a Version folder whose tag moved to another commit', () => {
+    const source = manualSource()
+    expect(runReconcile(world, source).status).toBe(0)
+    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# RETAGGED\n' }, 'move the tag')
+    git(source, 'tag', '-f', 'alpha-v1.0.0')
+    const before = remoteCommitCount(world)
+
+    const run = runReconcile(world, source)
+
+    expect(run.status).toBe(0)
+    expect(remoteCommitCount(world)).toBe(before + 1)
+    const landed = readRemote(world)
+    expect(readFile(landed, `${AREA}/alpha/1.0.0/intro.md`)).toBe('# RETAGGED\n')
+    expect(readFile(landed, `${AREA}/alpha/intro.md`)).toBe('# RETAGGED\n')
+    expect(readJson(landed, `${AREA}/alpha/1.0.0/.meta.json`).sourceRevision).toBe(git(source, 'rev-parse', 'HEAD'))
+    expect(run.summary).toContain(`- Republished \`${AREA}/alpha/1.0.0\`: its tag points at a different commit.`)
+    expect(run.summary).not.toContain('spec changed')
+  })
+
+  test('reports a Version whose tag moved while the source branch moved past the checkout as stale', () => {
+    const source = manualSource()
+    expect(runReconcile(world, source).status).toBe(0)
+    const tree = readTree(readRemote(world), `${AREA}/alpha/1.0.0`)
+    const stale = cloneSource(world, source, 'checkout-behind')
+    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# RETAGGED\n' }, 'move the tag')
+    git(source, 'tag', '-f', 'alpha-v1.0.0')
+    // The checkout sees the moved tag but not the commit the source branch now points at.
+    git(stale, 'fetch', '--quiet', '--force', '--tags', 'origin')
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world), { source: stale, reconcile: true })
+
+    expect(run.status).toBe(0)
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(readTree(readRemote(world), `${AREA}/alpha/1.0.0`)).toEqual(tree)
+    expect(run.summary).toContain(
+      `- Skipped \`${AREA}/alpha/1.0.0\`: the source branch \`main\` moved past the checkout`,
+    )
+    expect(run.summary).not.toContain('Republished')
+  })
+
+  test('stamps the tag commit into a legacy marker in place, without a checkout or a rebuild', () => {
+    const entry = releaseEntry({ build: 'exit 1' })
+    const source = manualSource(entry)
+    const metadata = meta({ source: 'acme/source', tag: 'alpha-v1.0.0', date: DATE, specHash: specHash(entry) })
+    seedDocs(world, {
+      [`${AREA}/alpha/1.0.0/.meta.json`]: metadata,
+      [`${AREA}/alpha/1.0.0/schema.json`]: 'hand edit',
+      [`${AREA}/alpha/1.0.0/extra.md`]: 'keep',
+    })
+    const before = remoteCommitCount(world)
+    const checkout = cloneSource(world, source, 'checkout-stamp')
+
+    const run = runPublisher(cloneDocs(world), { source: checkout, reconcile: true })
+
+    expect(run.status).toBe(0)
+    expect(git(checkout, 'symbolic-ref', '--short', 'HEAD')).toBe('main')
+    expect(remoteCommitCount(world)).toBe(before + 1)
+    const landed = readRemote(world)
+    expect(readJson(landed, `${AREA}/alpha/1.0.0/.meta.json`)).toEqual({
+      source: 'acme/source', tag: 'alpha-v1.0.0', date: DATE, specHash: specHash(entry),
+      sourceRevision: git(source, 'rev-parse', 'refs/tags/alpha-v1.0.0^{commit}'),
+    })
+    expect(readFile(landed, `${AREA}/alpha/1.0.0/schema.json`)).toBe('hand edit')
+    expect(readFile(landed, `${AREA}/alpha/1.0.0/extra.md`)).toBe('keep')
+    expect(run.summary).toContain(`- Recorded the source revision in \`${AREA}/alpha/1.0.0\`.`)
+    expect(run.summary).not.toContain('Republished')
   })
 
   test('republishes a drifted Version folder as a whole and rebuilds its latest copy', () => {
@@ -98,6 +188,7 @@ describe('manual runs remain compatible with release shared files', () => {
     expect(exists(landed, `${AREA}/alpha/extra.md`)).toBe(false)
     expect(readJson(landed, `${AREA}/alpha/1.0.0/.meta.json`)).toEqual({
       source: 'acme/source', tag: 'alpha-v1.0.0', date: DATE,
+      sourceRevision: git(source, 'rev-parse', 'refs/tags/alpha-v1.0.0^{commit}'),
       specHash: expect.stringMatching(/^[a-f0-9]{64}$/),
     })
     expect(readJson(landed, `${AREA}/alpha/1.0.0/.meta.json`).specHash).not.toBe('0'.repeat(64))

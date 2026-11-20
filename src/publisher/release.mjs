@@ -26,6 +26,7 @@ import {
   staleAreaFilesSummary,
   tagDate,
   tagExists,
+  tagRevision,
   markerRecordAt,
   withTagWorktree,
   writeFile,
@@ -62,11 +63,11 @@ function collectPackage({ source, entry, name, dir, marker }) {
   return files
 }
 
-export function planVersion({ source, root, entry, release, repository, date, tag }) {
+export function planVersion({ source, root, entry, release, repository, date, tag, sourceRevision }) {
   const versionDir = path.posix.join(root, entry.area, ...(release.name ? [release.name] : []), release.version)
   const files = collectPackage({
     source, entry, name: release.name, dir: versionDir,
-    marker: { source: repository, tag, date, specHash: specHash(entry) },
+    marker: { source: repository, tag, sourceRevision, date, specHash: specHash(entry) },
   })
   return { versionDir, name: release.name, version: release.version, files }
 }
@@ -164,19 +165,21 @@ export function rebuildPackages({ source, docs, root, entry, branch, changed, ti
 export function publishRelease({ args, release, repository, root }) {
   if (!tagExists(args.source, args.tag)) throw new FatalError(`tag ${args.tag} not found in ${args.source}`)
   const date = tagDate(args.source, args.tag)
-  return withTagWorktree(args.source, args.tag, (tagSource) => publishAtTag({ args, release, repository, root, date, tagSource }))
+  const sourceRevision = tagRevision(args.source, args.tag)
+  return withTagWorktree(args.source, args.tag, (tagSource) => publishAtTag(
+    { args, release, repository, root, date, tagSource, sourceRevision },
+  ))
 }
 
-// The tag a release-triggered publish recorded in a Version folder this repo published, or null when the folder
-// is not ours. A release-triggered publish never rewrites a Version this repo already published from the same tag,
-// whatever its specHash: moving a tag must not change bytes readers already link to. Republishing a Version whose
-// spec drifted stays Reconcile's job. A folder recorded from another tag is never republished either.
-function publishedTag(docs, root, versionDir, repository) {
+// The marker of a Version folder this repo published, or null when the folder is not ours. A release-triggered
+// publish rewrites a Version only when its tag now points at another commit: the bytes readers already link to stay
+// as they are for an unchanged tag, and a Version another tag published is never rewritten.
+function publishedMarker(docs, root, versionDir, repository) {
   const metadata = markerRecordAt(docs, root, versionDir)
-  return metadata?.source === repository ? metadata.tag : null
+  return metadata?.source === repository ? metadata : null
 }
 
-function publishAtTag({ args, release, repository, root, date, tagSource }) {
+function publishAtTag({ args, release, repository, root, date, tagSource, sourceRevision }) {
   const candidates = readEntries(args.entries, args['source-branch']).filter(
     (entry) => entry.mode === 'release' && (entry.packages !== undefined) === Boolean(release.name),
   )
@@ -241,20 +244,20 @@ function publishAtTag({ args, release, repository, root, date, tagSource }) {
       for (const area of areas) {
         // The freshness reference is the docs state the first attempt sees, right after it synced the branch.
         area.state ??= snapshotAreaState(args.docs, root, area.areaDir, area.entry)
-        const tag = publishedTag(args.docs, root, area.versionDir, repository)
-        if (tag === args.tag) {
+        const marker = publishedMarker(args.docs, root, area.versionDir, repository)
+        if (marker?.tag === args.tag && marker.sourceRevision === sourceRevision) {
           kept.add(area)
           continue
         }
-        if (tag !== null) {
-          problems.push(`refusing to publish \`${args.tag}\` over \`${tag}\` in \`${area.versionDir}\`: a Version folder keeps the tag that published it`)
+        if (marker && marker.tag !== args.tag) {
+          problems.push(`refusing to publish \`${args.tag}\` over \`${marker.tag}\` in \`${area.versionDir}\`: a Version folder keeps the tag that published it`)
           continue
         }
         try {
           assertNoSymlinkPath(args.docs, area.versionDir)
           const version = planVersion({
             source: tagSource, root, entry: area.entry,
-            release: { ...release, name: folders.get(area.entry) }, repository, date, tag: args.tag,
+            release: { ...release, name: folders.get(area.entry) }, repository, date, tag: args.tag, sourceRevision,
           })
           const fresh = snapshotAreaState(args.docs, root, area.areaDir, area.entry) === area.state
           // A newer push can publish the Area files before this attempt's first snapshot, and the snapshot then

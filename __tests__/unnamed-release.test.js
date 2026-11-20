@@ -4,6 +4,7 @@ import {
   entriesFile,
   exists,
   featureFiles,
+  git,
   makeDocsRemote,
   makeSource,
   meta,
@@ -56,7 +57,10 @@ describe('a v<semver> release tag', () => {
     expect(readTree(landed, 'site/raw/core/crds/latest')).toEqual({ 'index.yaml': CRDS })
     expect(readTree(landed, VERSION_DIR)).toEqual({
       'index.yaml': CRDS,
-      '.meta.json': meta({ source: 'acme/source', tag: TAG, date: DATE, specHash: specHash(unnamedReleaseEntry()) }),
+      '.meta.json': meta({
+        source: 'acme/source', tag: TAG, sourceRevision: git(source, 'rev-parse', 'HEAD'),
+        date: DATE, specHash: specHash(unnamedReleaseEntry()),
+      }),
     })
   })
 

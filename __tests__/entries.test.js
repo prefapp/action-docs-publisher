@@ -10,6 +10,7 @@ import {
   featureFiles,
   entriesFile,
   entriesJson,
+  git,
   makeDocsRemote,
   makeSource,
   meta,
@@ -357,12 +358,15 @@ describe('reading the rendered entries', () => {
   })
 
   test('publishes an unnamed release entry as its v<semver> Version folder, with its .meta.json', () => {
-    const { run } = publishWith([unnamedReleaseEntry()], { tag: 'v1.2.0', files: { 'index.yaml': 'kind: CRD\n' } })
+    const { run, source } = publishWith([unnamedReleaseEntry()], { tag: 'v1.2.0', files: { 'index.yaml': 'kind: CRD\n' } })
 
     expect(run.status).toBe(0)
     expect(readTree(readRemote(world), 'site/raw/core/crds/v1.2.0')).toEqual({
       'index.yaml': 'kind: CRD\n',
-      '.meta.json': meta({ source: 'acme/source', tag: 'v1.2.0', date: DATE, specHash: specHash(unnamedReleaseEntry()) }),
+      '.meta.json': meta({
+        source: 'acme/source', tag: 'v1.2.0', sourceRevision: git(source, 'rev-parse', 'HEAD'),
+        date: DATE, specHash: specHash(unnamedReleaseEntry()),
+      }),
     })
   })
 

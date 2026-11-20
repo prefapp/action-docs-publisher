@@ -106,6 +106,9 @@ function recordReleaseChanges({ args, areas, report, add }) {
     for (const dir of report.republished.filter((dir) => dir.startsWith(`${area.areaDir}/`))) {
       add(area.areaDir, `- Republish version \`${dir.slice(area.areaDir.length + 1)}\`: specHash changed.`)
     }
+    for (const dir of report.moved.filter((dir) => dir.startsWith(`${area.areaDir}/`))) {
+      add(area.areaDir, `- Republish version \`${dir.slice(area.areaDir.length + 1)}\`: its tag points at a different commit.`)
+    }
     for (const branch of report.branches.filter((branch) => branch.changed && branch.dir.startsWith(`${area.areaDir}/`))) {
       add(area.areaDir, `- ${branch.existed ? 'Refresh' : 'Add'} Branch Version folder \`${branch.dir.slice(area.areaDir.length + 1)}\`.`)
     }
@@ -211,6 +214,7 @@ function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
   if (problems.length) throw new FatalError([...new Set(problems)].join('\n'))
   return recordSharedChanges({ docs: args.docs, shared, changes, add })
     || prune.hasWork || reconcile.report.published.length > 0 || reconcile.report.republished.length > 0
+    || reconcile.report.moved.length > 0
     || reconcile.report.branches.some((branch) => branch.changed)
     || mirrors.some((mirror) => !lstatOrNull(path.join(args.docs, mirror.areaDir)))
 }

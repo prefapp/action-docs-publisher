@@ -26,9 +26,11 @@ import {
   isAncestor,
   keptAreaFiles,
   lstatOrNull,
+  metaFile,
   put,
   tagDate,
   tagExists,
+  tagRevision,
   TagContentError,
   markerRecordAt,
   writeFile,
@@ -81,11 +83,17 @@ function cleanSource(source) {
   git(source, ['clean', '-fdqx'])
 }
 
-// The tags a reconcile can never publish are named without a checkout.
-function noteUnpublishable(source, area, pkg) {
-  if (pkg.note) return
-  if (!tagExists(source, pkg.tag)) pkg.note = 'missing tag'
-  else if (pkg.prerelease && !area.entry.prereleases) pkg.note = 'prerelease'
+// The tags a reconcile can never publish are named without a checkout, and every tag it can publish carries the commit
+// it points at, which decides whether an already published Version folder is stale.
+function resolveTag(source, area, pkg) {
+  // A retired package's folders are pruned whatever its tags say.
+  if (pkg.note === 'retired') return
+  if (!tagExists(source, pkg.tag)) {
+    pkg.note ??= 'missing tag'
+    return
+  }
+  pkg.sourceRevision = tagRevision(source, pkg.tag)
+  if (!pkg.note && pkg.prerelease && !area.entry.prereleases) pkg.note = 'prerelease'
 }
 
 function readFromTag(source, root, area, pkg, repository) {
@@ -99,6 +107,7 @@ function readFromTag(source, root, area, pkg, repository) {
       release: { name: pkg.name, version: pkg.version },
       repository,
       tag: pkg.tag,
+      sourceRevision: pkg.sourceRevision,
       date: tagDate(source, pkg.tag),
     }).files
   } catch (error) {
@@ -111,7 +120,7 @@ function readFromTag(source, root, area, pkg, repository) {
 
 // Checking out a tag, building it and collecting its files is the expensive part of a reconcile, and the build runs
 // the tag's own code. So only the tags this run publishes are read: a Version folder the docs already hold with the
-// current specHash costs one marker read. A retry reads only what the first attempt did not.
+// current specHash and tag commit costs one marker read. A retry reads only what the first attempt did not.
 function readTags(source, root, pending, repository) {
   const unread = pending.filter(({ pkg }) => !pkg.files && !pkg.note)
   if (unread.length === 0) return
@@ -125,10 +134,13 @@ function readTags(source, root, pending, repository) {
   }
 }
 
-// The packages whose Version folder this run writes: the ones the docs do not hold, and the ones published from an
-// older spec. The rest are reported here as kept or stale.
+// The packages whose Version folder this run writes: the ones the docs do not hold, the ones published from an
+// older spec, and the ones whose tag now points at another commit. The rest are reported here as kept or stale; a
+// marker from before the publisher recorded the tag's commit has that commit stamped into it in place, with no
+// checkout, when its spec and bytes still hold.
 function versionsToWrite(docs, area, { source, repository, root, sourceMoved, report }) {
   const pending = []
+  const stamps = []
   for (const pkg of area.packages) {
     assertNoSymlinkPath(docs, pkg.versionDir)
     const existing = lstatOrNull(path.join(docs, pkg.versionDir))
@@ -143,20 +155,33 @@ function versionsToWrite(docs, area, { source, repository, root, sourceMoved, re
         throw new FatalError(`refusing to republish \`${pkg.versionDir}\` from \`${pkg.tag}\`: it holds the Version of \`${metadata.tag}\``)
       }
       if (!tagExists(source, metadata.tag)) continue
-      if (metadata.specHash === specHash(area.entry)) {
-        report.kept.push(pkg.versionDir)
+      const specChanged = metadata.specHash !== specHash(area.entry)
+      // A legacy marker names no revision, so it cannot disagree with the tag. A marker that names one disagrees
+      // when the tag moved: the folder holds the build of a commit the tag no longer points at.
+      const revisionChanged = metadata.sourceRevision !== undefined && metadata.sourceRevision !== pkg.sourceRevision
+      if (!specChanged && !revisionChanged) {
+        if (metadata.sourceRevision === undefined && !sourceMoved && pkg.sourceRevision !== undefined) {
+          const rel = `${pkg.versionDir}/.meta.json`
+          const fields = JSON.parse(fs.readFileSync(path.join(docs, rel), 'utf8'))
+          stamps.push({ rel, file: metaFile({ ...fields, sourceRevision: pkg.sourceRevision }) })
+          report.stamped.push(pkg.versionDir)
+        } else {
+          report.kept.push(pkg.versionDir)
+        }
         continue
       }
-      // A run whose checkout is behind the source branch tip reads an older entry than the one that published
-      // this Version, so it cannot tell which spec is newer: it keeps the bytes the docs already hold.
+      // A run whose checkout is behind the source branch tip reads an older entry and an older tag than the ones
+      // that published this Version, so it cannot tell which is newer: it keeps the bytes the docs already hold.
       if (sourceMoved) {
         report.specStale.push(pkg.versionDir)
         continue
       }
+      // A spec change keeps its own line in the summary and the plan; a tag that moved is the other reason.
+      pkg.reason = specChanged ? 'spec' : 'moved'
     } else if (existing) continue // Unmigrated or invalid folders are rejected by the shared-file guards.
     pending.push({ area, pkg, existing })
   }
-  return pending
+  return { pending, stamps }
 }
 
 function areaHasUnmergedRelease(source, docs, area) {
@@ -177,11 +202,15 @@ function reconcileSummary({ names, docsBranch, sourceBranch, changed, report }) 
   ] : []
   if (report.published.length > 0) lines.push(`- Published ${list(report.published)}.`)
   if (report.republished.length > 0) lines.push(`- Republished ${list(report.republished)}: spec changed.`)
+  if (report.moved.length > 0) lines.push(`- Republished ${list(report.moved)}: its tag points at a different commit.`)
   if (report.branches.some((branch) => branch.changed)) {
     lines.push(`- Published the Branch Version folders ${list(report.branches.filter((branch) => branch.changed).map((branch) => branch.dir))}.`)
   }
   if (report.kept.length > 0) {
     lines.push(`- Kept ${list(report.kept)}: specHash matches the current entry.`)
+  }
+  if (report.stamped.length > 0) {
+    lines.push(`- Recorded the source revision in ${list(report.stamped)}.`)
   }
   if (report.untagged.length > 0) {
     lines.push(`- Kept ${list(report.untagged)}: no matching tag in this repo to republish ${report.untagged.length === 1 ? 'it' : 'them'} from.`)
@@ -216,25 +245,31 @@ export function skippedReconcileLines({ sourceBranch, areaFilesSkipped, skipped,
 }
 
 export function planReconcileWrites(docs, areas, { source, repository, root, sourceBranch, sourceMoved = false }) {
-  const report = { published: [], republished: [], branches: [], kept: [], untagged: [], skipped: [], areaFilesSkipped: [], specStale: [], branchStale: [] }
+  const report = { published: [], republished: [], moved: [], branches: [], kept: [], stamped: [], untagged: [], skipped: [], areaFilesSkipped: [], specStale: [], branchStale: [] }
   const writes = new Map()
   const written = []
   const revision = areas.some((area) => area.entry.publishSourceBranch === true) ? git(source, ['rev-parse', 'HEAD']) : null
-  const pending = new Map(areas.map((area) => [area, versionsToWrite(docs, area, { source, repository, root, sourceMoved, report })]))
-  readTags(source, root, [...pending.values()].flat(), repository)
+  const planned = new Map(areas.map((area) => [area, versionsToWrite(docs, area, { source, repository, root, sourceMoved, report })]))
+  readTags(source, root, [...planned.values()].flatMap(({ pending }) => pending), repository)
   for (const area of areas) {
     const files = new Map()
     const versions = []
     written.push({ area: area.entry.area, areaDir: area.areaDir, files, versions })
-    for (const { pkg, existing } of pending.get(area)) {
+    const { pending, stamps } = planned.get(area)
+    // A legacy marker gains the tag's commit it already stands for: no checkout, no rebuild, and the folder's other
+    // files stay exactly as they are.
+    for (const { rel, file } of stamps) put(files, rel, file)
+    for (const { pkg, existing } of pending) {
       if (!pkg.files) {
         report.skipped.push(pkg)
         continue
       }
       for (const [rel, file] of pkg.files) put(files, rel, file)
       versions.push(pkg)
-      if (existing) report.republished.push(pkg.versionDir)
-      else report.published.push(pkg.versionDir)
+      if (existing) {
+        if (pkg.reason === 'moved') report.moved.push(pkg.versionDir)
+        else report.republished.push(pkg.versionDir)
+      } else report.published.push(pkg.versionDir)
     }
     // Hand-written metadata for a version with no tag: kept as it is, since nothing can republish it.
     for (const folder of existingVersionFolders(docs, area.areaDir, area.entry)) {
@@ -343,7 +378,7 @@ export function prepareReconcile({ args, repository, root, prune }) {
   const areas = entries.map((entry) => readReconcileArea(args.source, args.docs, root, entry, prune))
   rejectMergedVersionFolders(areas)
   for (const area of areas) {
-    for (const pkg of area.packages) noteUnpublishable(args.source, area, pkg)
+    for (const pkg of area.packages) resolveTag(args.source, area, pkg)
   }
 
   return areas
@@ -407,12 +442,12 @@ export function publishReconcile({ args, repository, root }) {
         // A replaced folder can lose a file and gain none, so the folder itself counts as the Area's path.
         paths: [
           ...area.files.keys(), ...shared[index].files.keys(), ...shared[index].removals,
-          ...[...reconcile.report.republished, ...reconcile.report.branches.map((branch) => branch.dir)]
+          ...[...reconcile.report.republished, ...reconcile.report.moved, ...reconcile.report.branches.map((branch) => branch.dir)]
             .filter((dir) => dir.startsWith(`${area.areaDir}/`)),
         ],
       }))
       writeMirrors(args.docs, writable)
-      for (const dir of reconcile.report.republished) fs.rmSync(path.join(args.docs, dir), { recursive: true, force: true })
+      for (const dir of [...reconcile.report.republished, ...reconcile.report.moved]) fs.rmSync(path.join(args.docs, dir), { recursive: true, force: true })
       // A Branch Version folder holds one build output: replacing it whole is what removes a file it no longer has.
       for (const branch of reconcile.report.branches) fs.rmSync(path.join(args.docs, branch.dir), { recursive: true, force: true })
       for (const [rel, file] of reconcile.files) writeFile(args.docs, rel, file)
