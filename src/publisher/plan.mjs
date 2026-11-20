@@ -19,7 +19,8 @@ import {
   writeSummary,
 } from './files.mjs'
 import { planReconcileSharedAreas, planReconcileWrites, prepareReconcile, skippedReconcileLines } from './reconcile.mjs'
-import { applyPrune, planPrune, scan } from './prune.mjs'
+import { applyPrune, planPrune } from './prune.mjs'
+import { discoverAreas } from './discovery.mjs'
 import { planMirrorWrites } from './mirror.mjs'
 import { docsRoot } from './root.mjs'
 
@@ -36,9 +37,9 @@ function writeIrrelevantPlan(file) {
   fs.writeFileSync(file, `${MARKER}\n${IRRELEVANT}\n## Docs publisher plan\n\nThis pull request no longer changes docs publishing.\n`)
 }
 
-function planRemovals({ args, prune, observed, add }) {
+function planRemovals({ args, prune, versions, branches, add }) {
   const changedAreas = new Set()
-  const branchDirs = new Set(observed.branches.map((branch) => branch.dir))
+  const branchDirs = new Set(branches.map((branch) => branch.dir))
   for (const { dir, kind, reason, areaDir: branchArea } of prune.removals) {
     // A Branch Version folder names its Area in the plan (it holds no Version folder to find one in).
     const areaDir = branchArea
@@ -50,12 +51,12 @@ function planRemovals({ args, prune, observed, add }) {
     } else if (branchDirs.has(dir)) {
       add(areaDir, `- Delete Branch Version folder \`${dir.slice(areaDir.length + 1)}\`: ${reason}.`)
     } else {
-      for (const version of observed.versions.filter((version) => version.dir.startsWith(`${dir}/`) || version.dir === dir)) {
+      for (const version of versions.filter((version) => version.dir.startsWith(`${dir}/`) || version.dir === dir)) {
         add(areaDir, `- Delete version \`${version.dir.slice(areaDir.length + 1)}\`: ${reason}.`)
       }
     }
   }
-  for (const version of observed.versions) {
+  for (const version of versions) {
     if (prune.isPruned(version.dir) && !tagExists(args.source, version.tag)) {
       add(version.areaDir, `- Warning: deleting version \`${version.dir.slice(version.areaDir.length + 1)}\`: no tag exists to rebuild it from.`)
     }
@@ -106,13 +107,17 @@ function recordReleaseChanges({ args, areas, report, add }) {
     for (const dir of report.republished.filter((dir) => dir.startsWith(`${area.areaDir}/`))) {
       add(area.areaDir, `- Republish version \`${dir.slice(area.areaDir.length + 1)}\`: specHash changed.`)
     }
+    for (const dir of report.moved.filter((dir) => dir.startsWith(`${area.areaDir}/`))) {
+      add(area.areaDir, `- Republish version \`${dir.slice(area.areaDir.length + 1)}\`: its tag points at a different commit.`)
+    }
     for (const branch of report.branches.filter((branch) => branch.changed && branch.dir.startsWith(`${area.areaDir}/`))) {
       add(area.areaDir, `- ${branch.existed ? 'Refresh' : 'Add'} Branch Version folder \`${branch.dir.slice(area.areaDir.length + 1)}\`.`)
     }
     for (const line of skippedReconcileLines({
       sourceBranch: args['source-branch'],
       areaFilesSkipped: report.areaFilesSkipped.filter(({ dir }) => dir === area.areaDir),
-      skipped: report.skipped.filter((pkg) => area.packages.includes(pkg)),
+      skips: report.skips.filter((skip) => skip.areaDir === area.areaDir),
+      collapse: true,
     })) add(area.areaDir, line)
   }
 }
@@ -176,7 +181,9 @@ function recordSharedChanges({ docs, shared, changes, add }) {
 
 function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
   assertNoSymlinkPath(args.docs, root)
-  const observed = scan(args.docs, root)
+  const observed = discoverAreas(args.docs, root)
+  const versions = observed.claims.filter((claim) => claim.kind === 'Version')
+  const branches = observed.claims.filter((claim) => claim.kind === 'Branch')
   const prune = planPrune({ docs: args.docs, source: args.source, root, repository, entries })
   const areas = prepareReconcile({ args, repository, root, prune })
   // A Branch Version marker names its release Area, so it can prove the Area belongs to another repo: the plan says
@@ -196,7 +203,7 @@ function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
     if (!changes.has(areaDir)) changes.set(areaDir, [])
     changes.get(areaDir).push(line)
   }
-  const changedAreas = planRemovals({ args, prune, observed, add })
+  const changedAreas = planRemovals({ args, prune, versions, branches, add })
   const sourceRevision = git(args.source, ['rev-parse', 'HEAD'])
   const mirrors = mirrorPlaceholders({ args, repository, root, entries, sourceRevision, changedAreas, add })
   const writable = planMirrorWrites({ args: { ...args, docs: snapshot }, repository, mirrors, releaseFiles: reconcile.files })
@@ -211,6 +218,7 @@ function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
   if (problems.length) throw new FatalError([...new Set(problems)].join('\n'))
   return recordSharedChanges({ docs: args.docs, shared, changes, add })
     || prune.hasWork || reconcile.report.published.length > 0 || reconcile.report.republished.length > 0
+    || reconcile.report.moved.length > 0
     || reconcile.report.branches.some((branch) => branch.changed)
     || mirrors.some((mirror) => !lstatOrNull(path.join(args.docs, mirror.areaDir)))
 }

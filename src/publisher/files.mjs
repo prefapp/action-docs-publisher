@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { SEMVER_REGEX, areaProblem, matchTag } from './entries.mjs'
+import { GENERATED_AREA_NAMES, SKIPPED_TAGS_FILE } from './area-names.mjs'
 import { docsRoot } from './root.mjs'
 
 export class FatalError extends Error {}
@@ -249,7 +250,10 @@ export function groupBy(items, keyFor) {
   return groups
 }
 
-export function assertCollectable(rel, from, versionDir) {
+export function assertCollectable(rel, from, versionDir, areaDir) {
+  if (areaDir !== undefined && rel === path.posix.join(areaDir, SKIPPED_TAGS_FILE)) {
+    throw new FatalError(`collect from "${from}" would publish ${rel}: ${SKIPPED_TAGS_FILE} is the publisher's Skipped tags file`)
+  }
   if (path.posix.basename(rel) === '.meta.json') {
     throw new FatalError(
       `collect from "${from}" would publish ${rel}: .meta.json marks ${versionDir === undefined ? 'an Area' : 'a Version folder'}, which the publisher writes`,
@@ -270,9 +274,6 @@ export function folderNames(dir) {
 }
 
 export const metaFile = (fields) => ({ content: JSON.stringify(fields, null, 2) + '\n' })
-
-// The names a rebuild generates at the top of an Area. Every other file there is an Area file of the entry.
-export const GENERATED_AREA_NAMES = new Set(['index.json', 'versions.json', '.meta.json'])
 
 // `latest` is a generated name only where the rebuild writes the Latest folder: the top of an Area without
 // `packages`. Entry validation reserves the name there alone, so a named Area's `latest` is one of its Area files.
@@ -361,6 +362,10 @@ export function readMarkerRecord(bytes, marker, root) {
   if ('tag' in metadata) {
     if (!text('tag') || (metadata.specHash !== undefined &&
         (typeof metadata.specHash !== 'string' || !/^[a-f0-9]{64}$/.test(metadata.specHash)))) invalid()
+    // A Version folder published before the publisher recorded the tag's commit holds no `sourceRevision`: it is a
+    // legacy marker, and the next run stamps it. A marker that names one names the commit, never the tag object.
+    if (metadata.sourceRevision !== undefined &&
+        (typeof metadata.sourceRevision !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(metadata.sourceRevision))) invalid()
     let release
     try { release = matchTag(metadata.tag) } catch { invalid() }
     if (!release || path.posix.basename(dir) !== release.version) invalid()
@@ -394,31 +399,6 @@ export function markerRecordAt(docs, root, dir) {
   if (!stat) return null
   if (!stat.isFile()) throw new FatalError(`invalid .meta.json: ${marker}`)
   return readMarkerRecord(fs.readFileSync(path.join(docs, marker), 'utf8'), marker, root)
-}
-
-// Every record under a folder, excluding the folder itself. A Version's content has its own nesting guards.
-// Prune can defer damaged version-shaped folders it does not affect; the reader still refuses their metadata.
-export function markerRecords(docs, root, base = root, onInvalid) {
-  const records = []
-  const walk = (dir) => {
-    for (const name of folderNames(path.join(docs, dir)).sort()) {
-      // A docs root of `.` scans the checkout itself: its `.git` folder is Git's, never an Area's.
-      if (namesGitPath(name)) continue
-      const child = path.posix.join(dir, name)
-      // Discovery never follows a marker symlink; the write and prune tree guards refuse affected links.
-      if (lstatOrNull(path.join(docs, child, '.meta.json'))?.isSymbolicLink()) { walk(child); continue }
-      let record
-      try { record = markerRecordAt(docs, root, child) } catch (error) {
-        if (!(error instanceof FatalError) || !onInvalid) throw error
-        onInvalid(child, error)
-        continue
-      }
-      if (record) records.push(record)
-      if (record?.kind !== 'Version') walk(child)
-    }
-  }
-  if (lstatOrNull(path.join(docs, base))?.isDirectory()) walk(base)
-  return records
 }
 
 // Every kind of record claims an Area in the same way. The caller supplies all Areas it will change, including
@@ -553,15 +533,13 @@ export function areaFileProblemsSummary(areaDir, problem) {
   writeSummary(`Kept the Area files of \`${areaDir}\`: ${problem}; run a manual run to repair it.`)
 }
 
-// True when a folder holds a `.meta.json` anywhere below it: an Area, a Version folder or a nested Area. It is the
-// evidence that a source repo published there, whatever the marker says.
 function holdsMarker(docs, dir) {
   const walk = (rel) => {
     for (const name of fs.readdirSync(path.join(docs, rel)).sort()) {
       if (name === GIT_DIR) continue
       const child = `${rel}/${name}`
       const stat = lstatOrNull(path.join(docs, child))
-      if (name === '.meta.json') return true
+      if (name === '.meta.json' || name === SKIPPED_TAGS_FILE) return true
       if (stat?.isDirectory() && walk(child)) return true
     }
     return false
@@ -629,6 +607,18 @@ export function commitDate(source, revision) {
   return isoDate(git(source, ['show', '-s', '--format=%cI', revision]))
 }
 
+// The commit a tag points at, or null when this checkout holds no such tag. `^{commit}` peels an annotated tag to
+// the commit it names, so a tag recreated or moved to another commit reads as a different revision whatever the tag
+// object around it. One read answers both questions, so a caller never asks twice and reads two different commits.
+export function tagCommit(source, tag) {
+  const result = gitStatus(source, ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}^{commit}`])
+  return result.status === 0 ? result.stdout.trim() : null
+}
+
 export function tagExists(source, tag) {
-  return gitStatus(source, ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}^{commit}`]).status === 0
+  return tagCommit(source, tag) !== null
+}
+
+export function tagRevision(source, tag) {
+  return git(source, ['rev-parse', '--verify', `refs/tags/${tag}^{commit}`])
 }

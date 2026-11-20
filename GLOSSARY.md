@@ -36,6 +36,10 @@ _Avoid_: sync Area, latest Area
 The folder holding one released version's docs and its `.meta.json`.
 _Avoid_: release folder, version directory
 
+**Version marker**:
+The `.meta.json` of a Version folder: the source repo, the tag it was published from, the tag's date, the entry's `specHash` and `sourceRevision` (the commit the tag pointed to).
+_Avoid_: version metadata
+
 **Branch Version folder**:
 The folder holding the build output of the tip of the source branch, named after that branch, written by a release entry that sets `publishSourceBranch`. It is not a version: no version list, Latest copy or Version folder names it, and it holds no tag. Its marker names the release Area it was published into. A run replaces it whole, so a folder with no marker of its own is hand-made: the run refuses it instead of deleting its files.
 _Avoid_: branch folder, main docs, snapshot folder
@@ -55,6 +59,10 @@ _Avoid_: derived files, summaries
 **Area files**:
 Single files from the source repo placed at the top of a release Area, for example `features/README.md`.
 _Avoid_: top files, landing files
+
+**Skipped tags file**:
+The `.skipped-tags.json` at the top of a Release Area recording the source repo that owns the Area and the tags a Reconcile skipped, along with the state under which each was skipped, so later runs do not re-check unchanged skips. Removed when no skipped tags remain.
+_Avoid_: tag cache, tag database, ignore file, skip ledger
 
 **Collect rule**:
 One `{from, to}` pair of an entry. It copies either one file (a literal `from`) or every file a glob matches into the Version folder or the Area.
@@ -81,7 +89,7 @@ The `skipped` run mode. A run started by a release whose tag is not a release of
 _Avoid_: no-op, ignored release
 
 **Reconcile**:
-A run that makes the docs repo match the entries file and the source repo's tags. It adds missing versions, republishes versions whose spec changed, publishes Branch Version folders, prunes, replaces Areas whose entry mode changed, republishes mirrors and rebuilds release Areas.
+A run that makes the docs repo match the entries file and the source repo's tags. It adds missing versions, republishes versions whose spec or tag commit changed, records skipped tags in the Skipped tags file, publishes Branch Version folders, prunes, replaces Areas whose entry mode changed, republishes mirrors and rebuilds release Areas.
 _Avoid_: Backfill, sync
 
 **Plan mode**:

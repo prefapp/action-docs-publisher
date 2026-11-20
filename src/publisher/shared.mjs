@@ -1,8 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { SEMVER_REGEX } from './entries.mjs'
-import { FatalError, assertAreaWritable, assertRecordOwners, assertNoSymlinkPath, existingVersionFolders, folderNames, markerRecordAt, markerRecords, lstatOrNull, metaFile, put, readMarkerRecord, writeFile, writeSummary } from './files.mjs'
-import { scan } from './prune.mjs'
+import { FatalError, assertAreaWritable, assertRecordOwners, assertNoSymlinkPath, existingVersionFolders, folderNames, markerRecordAt, lstatOrNull, metaFile, put, readMarkerRecord, writeFile, writeSummary } from './files.mjs'
+import { discoverAreas, markerRecords } from './discovery.mjs'
+import { skippedRecordAt } from './skipped.mjs'
+import { SKIPPED_TAGS_FILE } from './area-names.mjs'
 import { docsRoot } from './root.mjs'
 
 // Ported from the former shared-file rebuilder. Build identifiers do not affect precedence.
@@ -100,13 +102,14 @@ export function placementProblems(docs, root, areaDir, versions) {
       return null
     }
   }
-  const records = scan(docs, root).records
+  const discovered = discoverAreas(docs, root)
+  const releaseAreas = discovered.releaseAreas()
   const scope = docsRoot(root)
   const labels = { Version: 'Version folder', Branch: 'Branch Version folder', Mirror: 'mirror Area' }
   for (let dir = areaDir; scope.contains(dir); dir = path.posix.dirname(dir)) {
     const record = read(dir)
     if (record) problems.push(`refusing to publish ${areaDir}: it sits inside a ${labels[record.kind]} at ${dir}`)
-    if (dir !== areaDir && records.some((record) => record.areaDir === dir && record.dir !== dir)) {
+    if (dir !== areaDir && releaseAreas.has(dir)) {
       problems.push(`refusing to publish ${areaDir}: it sits inside a release Area at ${dir}`)
     }
   }
@@ -114,9 +117,9 @@ export function placementProblems(docs, root, areaDir, versions) {
     const parent = path.posix.dirname(version.versionDir)
     if (parent !== areaDir && read(parent)) problems.push(`refusing to publish ${version.versionDir}: it sits inside a mirror Area at ${parent}`)
   }
-  // A Mirror Area never sits inside a release Area. The scan skips a Version folder's inside, which `versionFiles`
+  // A Mirror Area never sits inside a release Area. The walk skips a Version folder's inside, which `versionFiles`
   // covers: a marker there is refused with the same message.
-  for (const mirror of scan(docs, root).mirrors) {
+  for (const mirror of discovered.claims.filter((claim) => claim.kind === 'Mirror')) {
     if (mirror.dir.startsWith(`${areaDir}/`)) problems.push(mirrorAreaProblem(areaDir, mirror.dir))
   }
   return problems
@@ -131,10 +134,15 @@ export function planSharedArea({ docs, root, entry, repository, branch, docsRepo
   }
   const problems = []
   const records = markerRecords(docs, root, areaDir, (_dir, error) => problems.push(error.message))
+  let own = null
+  try { own = skippedRecordAt(docs, areaDir) } catch (error) {
+    if (!(error instanceof FatalError)) throw error
+    problems.push(error.message)
+  }
   // The Branch Version folders the marker reader validated: each holds content, not a version of this list, and prune
   // decides when it retires. A folder it does not name is no Branch Version folder, whatever it is called.
   const branchDirs = new Set(records.filter((record) => record.kind === 'Branch').map((record) => record.dir))
-  try { assertRecordOwners(records, [areaDir], root, repository) } catch (error) {
+  try { assertRecordOwners([...records, ...(own ? [own] : [])], [areaDir], root, repository) } catch (error) {
     if (!(error instanceof FatalError)) throw error
     problems.push(error.message)
   }
@@ -231,6 +239,7 @@ export function planSharedArea({ docs, root, entry, repository, branch, docsRepo
   if (entry.packages !== undefined) put(files, `${areaDir}/index.json`, metaFile({ [entry.area.split('/').at(-1)]: rows }))
   for (const name of lstatOrNull(path.join(docs, areaDir))?.isDirectory() ? fs.readdirSync(path.join(docs, areaDir)) : []) {
     const rel = `${areaDir}/${name}`
+    if (name === SKIPPED_TAGS_FILE) continue
     if (!lstatOrNull(path.join(docs, rel))?.isDirectory() && !files.has(rel)) removals.push(rel)
   }
   try { assertAreaWritable(docs, areaDir, files, removals) } catch (error) {

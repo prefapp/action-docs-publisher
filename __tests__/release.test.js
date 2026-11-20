@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from '@jest/globals'
 import { chmodSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
-import { cloneDocs, cloneSource, commitSource, entriesFile, exists, featureFiles, git, makeDocsRemote, makeSource, packageFiles, readFile, readJson, readRemote, readTree, releaseCommit, releaseEntry, remoteCommitCount, runPublisher, startPublisher, waitForFile, write } from '../test/harness.mjs'
+import { pathToFileURL } from 'node:url'
+import { cloneDocs, cloneSource, commitSource, entriesFile, exists, featureFiles, git, makeDocsRemote, makeSource, meta, packageFiles, readFile, readJson, readRemote, readTree, releaseCommit, releaseEntry, remoteCommitCount, renderedScript, runPublisher, seedDocs, startPublisher, unnamedReleaseEntry, waitForFile, write } from '../test/harness.mjs'
+
+const { specHash } = await import(pathToFileURL(renderedScript('entries.mjs')).href)
 
 const TAG = 'alpha-v1.0.0'
 const DATE = '2026-01-02T03:04:05Z'
@@ -52,12 +55,11 @@ describe('release selection and collection', () => {
     expect(remoteCommitCount(world)).toBe(before)
   })
 
-  test('keeps a published Version byte for byte when its tag moves, and commits nothing', () => {
+  test('keeps a published Version byte for byte when its tag still points at the published commit, and commits nothing', () => {
     const source = sourceWith()
     expect(runPublisher(cloneDocs(world, 'docs-first'), { source, tag: TAG }).status).toBe(0)
-    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# RETAGGED\n' }, 'move the tag')
-    git(source, 'tag', '--force', TAG)
     const before = remoteCommitCount(world)
+    const published = readTree(readRemote(world))
 
     const run = runPublisher(cloneDocs(world, 'docs-second'), { source, tag: TAG })
 
@@ -66,10 +68,234 @@ describe('release selection and collection', () => {
       `Already published \`${TAG}\` in area \`features\`: kept \`site/raw/features/alpha/1.0.0\` as it is.`,
     )
     expect(remoteCommitCount(world)).toBe(before)
-    expect(readFile(readRemote(world), 'site/raw/features/alpha/1.0.0/intro.md')).toBe('# alpha\n')
+    expect(readTree(readRemote(world))).toEqual(published)
   })
 
-  test('does not rewrite a Version another clone published, even from a stale clone', () => {
+  test('records the tag commit in the Version marker, peeling an annotated tag to the commit', () => {
+    const source = sourceWith()
+
+    expect(runPublisher(cloneDocs(world), { source, tag: TAG }).status).toBe(0)
+
+    const metadata = readJson(readRemote(world), 'site/raw/features/alpha/1.0.0/.meta.json')
+    expect(metadata.sourceRevision).toBe(git(source, 'rev-parse', `refs/tags/${TAG}^{commit}`))
+    expect(metadata.sourceRevision).toBe(git(source, 'rev-parse', 'HEAD'))
+    // The tag object of an annotated tag is a commit of its own: the marker never records it.
+    expect(metadata.sourceRevision).not.toBe(git(source, 'rev-parse', `refs/tags/${TAG}`))
+  })
+
+  test('republishes the Version folder and the shared files when its tag moves', () => {
+    const source = sourceWith()
+    expect(runPublisher(cloneDocs(world, 'docs-first'), { source, tag: TAG }).status).toBe(0)
+    const first = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# RETAGGED\n' }, 'move the tag')
+    git(source, 'tag', '--force', TAG)
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world, 'docs-second'), { source, tag: TAG })
+
+    expect(run.status).toBe(0)
+    expect(remoteCommitCount(world)).toBe(before + 1)
+    const landed = readRemote(world)
+    expect(readFile(landed, 'site/raw/features/alpha/1.0.0/intro.md')).toBe('# RETAGGED\n')
+    expect(readJson(landed, 'site/raw/features/alpha/1.0.0/.meta.json')).toEqual(expect.objectContaining({
+      tag: TAG, sourceRevision: git(source, 'rev-parse', 'HEAD'),
+    }))
+    // The Area's shared files follow the rebuilt Version, not the bytes of the commit the tag left behind.
+    expect(readJson(landed, 'site/raw/features/alpha/versions.json')).toEqual([
+      expect.objectContaining({ version: '1.0.0' }),
+    ])
+    expect(readFile(landed, 'site/raw/features/alpha/intro.md')).toBe('# RETAGGED\n')
+    expect(readJson(landed, 'site/raw/features/alpha/1.0.0/.meta.json').sourceRevision).not.toBe(first)
+    expect(run.summary).not.toContain('Already published')
+  })
+
+  test('republishes the latest copy of an unnamed Area when its tag moves', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { 'index.yaml': 'one\n', ...entriesFile([unnamedReleaseEntry()]) }, 'v1.0.0', DATE)
+    expect(runPublisher(cloneDocs(world, 'docs-first'), { source, tag: 'v1.0.0' }).status).toBe(0)
+    commitSource(source, { 'index.yaml': 'two\n' }, 'move the tag')
+    git(source, 'tag', '--force', 'v1.0.0')
+
+    const run = runPublisher(cloneDocs(world, 'docs-second'), { source, tag: 'v1.0.0' })
+
+    expect(run.status).toBe(0)
+    const landed = readRemote(world)
+    expect(readFile(landed, 'site/raw/core/crds/v1.0.0/index.yaml')).toBe('two\n')
+    expect(readFile(landed, 'site/raw/core/crds/latest/index.yaml')).toBe('two\n')
+    expect(readJson(landed, 'site/raw/core/crds/versions.json')).toEqual([
+      { version: 'v1.0.0', date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/), url: expect.stringContaining('/core/crds/v1.0.0/index.yaml') },
+    ])
+  })
+
+  test('republishes a legacy marker without sourceRevision, and records the tag commit', () => {
+    const source = sourceWith()
+    seedDocs(world, {
+      'site/raw/features/alpha/1.0.0/.meta.json': meta({
+        source: 'acme/source', tag: TAG, date: DATE, specHash: specHash(releaseEntry()),
+      }),
+      'site/raw/features/alpha/1.0.0/schema.json': 'hand edit',
+      'site/raw/features/alpha/1.0.0/extra.md': 'obsolete',
+    })
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world), { source, tag: TAG })
+
+    expect(run.status).toBe(0)
+    expect(remoteCommitCount(world)).toBe(before + 1)
+    const landed = readRemote(world)
+    expect(readJson(landed, 'site/raw/features/alpha/1.0.0/.meta.json').sourceRevision).toBe(git(source, 'rev-parse', 'HEAD'))
+    expect(readFile(landed, 'site/raw/features/alpha/1.0.0/schema.json')).toBe('{}\n')
+    expect(exists(landed, 'site/raw/features/alpha/1.0.0/extra.md')).toBe(false)
+  })
+
+  test('fails a published tag that moved to a commit without its package folder, and keeps the bytes', () => {
+    const source = sourceWith()
+    expect(runPublisher(cloneDocs(world, 'docs-first'), { source, tag: TAG }).status).toBe(0)
+    const published = readTree(readRemote(world))
+    commitSource(source, { 'packages/alpha': null }, 'move the tag off the package folder')
+    git(source, 'tag', '--force', TAG)
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world, 'docs-second'), { source, tag: TAG })
+
+    expect(run.status).toBe(2)
+    expect(run.output).toContain(`refusing to publish \`${TAG}\` over \`site/raw/features/alpha/1.0.0\``)
+    expect(run.output).toContain('the docs hold its Version')
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(readTree(readRemote(world))).toEqual(published)
+  })
+
+  test('fails a run whose tag origin no longer names, instead of publishing its local ref', () => {
+    const source = sourceWith()
+    // A delayed run holds the older tag commit, and origin drops the tag after a newer publish landed.
+    const delayed = cloneSource(world, source, 'delayed-release')
+    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# RETAGGED\n' }, 'move the tag')
+    git(source, 'tag', '--force', TAG)
+    expect(runPublisher(cloneDocs(world, 'docs-newer'), { source, tag: TAG }).status).toBe(0)
+    const published = readTree(readRemote(world))
+    const before = remoteCommitCount(world)
+    git(source, 'tag', '--delete', TAG)
+
+    const run = runPublisher(cloneDocs(world, 'docs-unanchored'), { source: delayed, tag: TAG })
+
+    expect(run.status).toBe(2)
+    expect(run.output).toContain(`refusing to publish \`${TAG}\`: origin holds no such tag`)
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(readTree(readRemote(world))).toEqual(published)
+    expect(readFile(readRemote(world), 'site/raw/features/alpha/1.0.0/intro.md')).toBe('# RETAGGED\n')
+  })
+
+  test('keeps an already published Version as it is when only the entry changed', () => {
+    const source = sourceWith()
+    expect(runPublisher(cloneDocs(world, 'docs-first'), { source, tag: TAG }).status).toBe(0)
+    const published = readTree(readRemote(world))
+    // The tag keeps its commit: only the entry's package folder moves, so the tag no longer holds the folder it names.
+    git(source, 'mv', 'packages', 'pkgs')
+    commitSource(source, entriesFile([releaseEntry({ packages: 'pkgs' })]), 'move the package folder in the entry')
+    const tagCommit = git(source, 'rev-parse', `refs/tags/${TAG}^{commit}`)
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world, 'docs-second'), { source, tag: TAG })
+
+    expect(git(source, 'rev-parse', `refs/tags/${TAG}^{commit}`)).toBe(tagCommit)
+    expect(run.status).toBe(0)
+    expect(run.summary).toContain(
+      `Already published \`${TAG}\` in area \`features\`: kept \`site/raw/features/alpha/1.0.0\` as it is.`,
+    )
+    expect(run.summary).not.toContain('no `pkgs/alpha` folder at the tag')
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(readTree(readRemote(world))).toEqual(published)
+  })
+
+  test('fails a moved published tag the prerelease filter would drop, before it reports a skip', () => {
+    const source = makeSource(world)
+    // `features` holds the folder but publishes no prereleases, so the tag reaches no publishable Area; `beta` holds
+    // this tag's Version from another commit and no folder at the tag any more.
+    releaseCommit(source, {
+      ...featureFiles('alpha'),
+      ...entriesFile([releaseEntry(), releaseEntry({ area: 'beta', packages: 'beta', prereleases: true })]),
+    }, 'alpha-v1.1.0-rc.1', DATE)
+    seedDocs(world, {
+      'site/raw/beta/alpha/1.1.0-rc.1/.meta.json': meta({
+        source: 'acme/source', tag: 'alpha-v1.1.0-rc.1', sourceRevision: 'b'.repeat(40), date: DATE, specHash: specHash(releaseEntry()),
+      }),
+      'site/raw/beta/alpha/1.1.0-rc.1/intro.md': '# older build\n',
+    })
+    const published = readTree(readRemote(world))
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world), { source, tag: 'alpha-v1.1.0-rc.1' })
+
+    expect(run.status).toBe(2)
+    expect(run.output).toContain('refusing to publish `alpha-v1.1.0-rc.1` over `site/raw/beta/alpha/1.1.0-rc.1`')
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(readTree(readRemote(world))).toEqual(published)
+  })
+
+  test('refuses to roll back a newer publish when its clone holds an older tag', () => {
+    const source = sourceWith()
+    // A delayed run keeps the tag commit it planned from, while origin moves the tag on and a newer run publishes it.
+    const delayed = cloneSource(world, source, 'delayed-release')
+    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# RETAGGED\n' }, 'move the tag')
+    git(source, 'tag', '--force', TAG)
+    const winner = runPublisher(cloneDocs(world, 'docs-newer'), { source, tag: TAG })
+    const published = readTree(readRemote(world))
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world, 'docs-stale'), { source: delayed, tag: TAG })
+
+    expect(winner.status).toBe(0)
+    expect(run.status).toBe(2)
+    expect(run.output).toContain(`refusing to publish \`${TAG}\`: origin names`)
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(readTree(readRemote(world))).toEqual(published)
+    expect(readFile(readRemote(world), 'site/raw/features/alpha/1.0.0/intro.md')).toBe('# RETAGGED\n')
+  })
+
+  test('fails on a malformed Skipped tags file in the Area, even when the Version is unchanged', () => {
+    const source = sourceWith()
+    expect(runPublisher(cloneDocs(world, 'docs-first'), { source, tag: TAG }).status).toBe(0)
+    seedDocs(world, { 'site/raw/features/.skipped-tags.json': '{' })
+    const before = remoteCommitCount(world)
+    const published = readTree(readRemote(world))
+
+    const run = runPublisher(cloneDocs(world, 'docs-second'), { source, tag: TAG })
+
+    expect(run.status).toBe(2)
+    expect(run.output).toContain('invalid .skipped-tags.json: site/raw/features/.skipped-tags.json')
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(readTree(readRemote(world))).toEqual(published)
+  })
+
+  test('fails on a malformed Skipped tags file in a candidate Area, even when it publishes no Version', () => {
+    const source = sourceWith(releaseEntry(), 'ghost-v1.0.0')
+    seedDocs(world, { 'site/raw/features/.skipped-tags.json': '{' })
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world), { source, tag: 'ghost-v1.0.0' })
+
+    expect(run.status).toBe(2)
+    expect(run.output).toContain('invalid .skipped-tags.json: site/raw/features/.skipped-tags.json')
+    expect(remoteCommitCount(world)).toBe(before)
+  })
+
+  test('fails a moved tag whose content no longer fits the entry, and commits nothing', () => {
+    const source = sourceWith()
+    expect(runPublisher(cloneDocs(world, 'docs-first'), { source, tag: TAG }).status).toBe(0)
+    const published = readTree(readRemote(world))
+    commitSource(source, { 'packages/alpha/schema.json': null }, 'move the tag to an unfit commit')
+    git(source, 'tag', '--force', TAG)
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world, 'docs-second'), { source, tag: TAG })
+
+    expect(run.status).toBe(2)
+    expect(run.output).toContain('not found: schema.json')
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(readTree(readRemote(world))).toEqual(published)
+  })
+
+  test('republishes the Version a stale docs clone still holds when the tag moved', () => {
     const source = sourceWith()
     const stale = cloneDocs(world, 'docs-stale')
     expect(runPublisher(cloneDocs(world, 'docs-first'), { source, tag: TAG }).status).toBe(0)
@@ -80,19 +306,13 @@ describe('release selection and collection', () => {
     const run = runPublisher(stale, { source, tag: TAG })
 
     expect(run.status).toBe(0)
-    expect(run.summary).toContain(
-      `Already published \`${TAG}\` in area \`features\`: kept \`site/raw/features/alpha/1.0.0\` as it is.`,
-    )
-    expect(remoteCommitCount(world)).toBe(before)
-    expect(readFile(readRemote(world), 'site/raw/features/alpha/1.0.0/intro.md')).toBe('# alpha\n')
+    expect(remoteCommitCount(world)).toBe(before + 1)
+    expect(readFile(readRemote(world), 'site/raw/features/alpha/1.0.0/intro.md')).toBe('# RETAGGED\n')
     expect(git(stale, 'status', '--porcelain')).toBe('')
   })
 
   test('keeps a Version that appears between push attempts, without rewriting it', async () => {
     const source = sourceWith()
-    const staleSource = cloneSource(world, source, 'source-stale')
-    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# RETAGGED\n' }, 'move the tag')
-    git(source, 'tag', '--force', TAG)
 
     const docs = cloneDocs(world, 'docs-race')
     const ready = join(world.base, 'publish-ready')
@@ -104,7 +324,7 @@ describe('release selection and collection', () => {
     let winner
     try {
       await waitForFile(ready)
-      winner = runPublisher(cloneDocs(world, 'docs-winner'), { source: staleSource, tag: TAG })
+      winner = runPublisher(cloneDocs(world, 'docs-winner'), { source, tag: TAG })
     } finally {
       write(world.base, { 'publish-resume': '' })
     }
@@ -290,7 +510,7 @@ describe('release selection and collection', () => {
     )
   }, 20000)
 
-  test('keeps a Version folder whose spec drifted, and leaves its republish to a reconcile', () => {
+  test('republishes every Area a moved tag publishes, whatever its spec', () => {
     const source = makeSource(world)
     const extra = (collect) => releaseEntry({ area: 'extra', mainFile: 'intro.md', collect })
     const narrowed = [{ from: 'templates/docs/*.md', to: '.' }]
@@ -310,25 +530,12 @@ describe('release selection and collection', () => {
     const run = runPublisher(cloneDocs(world, 'docs-second'), { source, tag: TAG })
 
     expect(run.status).toBe(0)
-    expect(run.summary).toContain(`Already published \`${TAG}\` in area \`features\`: kept \`site/raw/features/alpha/1.0.0\` as it is.`)
-    expect(run.summary).toContain(`Already published \`${TAG}\` in area \`extra\`: kept \`site/raw/extra/alpha/1.0.0\` as it is.`)
-    expect(run.summary).not.toContain('Published')
-    expect(remoteCommitCount(world)).toBe(before)
+    expect(remoteCommitCount(world)).toBe(before + 1)
     const landed = readRemote(world)
-    expect(readFile(landed, 'site/raw/features/alpha/1.0.0/intro.md')).toBe('# alpha\n')
-    expect(readFile(landed, 'site/raw/extra/alpha/1.0.0/intro.md')).toBe('# alpha\n')
-    expect(exists(landed, 'site/raw/extra/alpha/1.0.0/CHANGELOG.md')).toBe(false)
-
-    const reconciled = runPublisher(cloneDocs(world, 'docs-third'), {
-      source: cloneSource(world, source, 'reconcile-source'), reconcile: true,
-    })
-
-    expect(reconciled.status).toBe(0)
-    expect(reconciled.summary).toContain('- Republished `site/raw/extra/alpha/1.0.0`: spec changed.')
-    const republished = readRemote(world)
-    expect(readFile(republished, 'site/raw/extra/alpha/1.0.0/intro.md')).toBe('# RETAGGED\n')
-    expect(readFile(republished, 'site/raw/extra/alpha/1.0.0/CHANGELOG.md')).toBe('# Changelog\n')
-    expect(readFile(republished, 'site/raw/features/alpha/1.0.0/intro.md')).toBe('# alpha\n')
+    expect(readFile(landed, 'site/raw/features/alpha/1.0.0/intro.md')).toBe('# RETAGGED\n')
+    expect(readFile(landed, 'site/raw/extra/alpha/1.0.0/intro.md')).toBe('# RETAGGED\n')
+    expect(readFile(landed, 'site/raw/extra/alpha/1.0.0/CHANGELOG.md')).toBe('# Changelog\n')
+    expect(run.summary).not.toContain('Already published')
   })
 
   test('refuses a tag that resolves to a Version folder another tag published', () => {

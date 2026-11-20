@@ -200,15 +200,15 @@ A `.meta.json` marks every folder the publisher owns. A run only touches or dele
 
 | Marker | Where | Fields |
 | --- | --- | --- |
-| Version marker | each Version folder | `source`, `tag`, `date`, `specHash` |
+| Version marker | each Version folder | `source`, `tag`, `sourceRevision`, `date`, `specHash` |
 | Mirror marker | root of each Mirror Area | `source`, `sourceRevision`, `sourceBranch`, `date` |
 | Branch Version marker | each Branch Version folder | `source`, `area`, `branch`, `sourceRevision`, `date` |
 
 ```json
-{ "source": "my-org/features", "tag": "state_repo-v1.2.0", "date": "2025-03-04T10:15:00Z", "specHash": "4f65…" }
+{ "source": "my-org/features", "tag": "state_repo-v1.2.0", "sourceRevision": "9b2f…", "date": "2025-03-04T10:15:00Z", "specHash": "4f65…" }
 ```
 
-`specHash` hashes the entry's `collect`, `build` and `packages`. A reconcile republishes a version from its tag when the hash differs from the current entry. A marker with a missing or invalid field is damaged: the run stops with `invalid .meta.json: <path>`.
+`specHash` hashes the entry's `collect`, `build` and `packages`. A reconcile republishes a version from its tag when the hash differs from the current entry. `sourceRevision` is the commit the tag pointed to, so a tag moved to another commit is republished from it; a marker written before this field existed is stamped by the next reconcile, and republished by a release run. A marker with a missing or invalid field is damaged: the run stops with `invalid .meta.json: <path>`.
 
 ## Manual run
 

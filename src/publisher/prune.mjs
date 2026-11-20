@@ -11,16 +11,16 @@ import {
   hasTreeAt,
   lstatOrNull,
   assertRecordOwners,
-  markerRecords,
   tagExists,
   writeSummary,
 } from './files.mjs'
+import { discoverAreas } from './discovery.mjs'
 import { docsRoot } from './root.mjs'
 
 // Prune makes the docs repo match the desired state: an Area whose entry is gone, or a package whose
 // folder is gone from the source repo, is deleted. It only touches folders whose .meta.json names this repo.
 
-// Prune never deletes outside the configured root, whatever the scan inferred or a plan asks for.
+// Prune never deletes outside the configured root, whatever discovery found or a plan asks for.
 function assertInsideRoot(root, rel) {
   if (!docsRoot(root).containsBelow(rel)) {
     throw new FatalError(`refusing to delete ${rel}: it is not under the docs root "${root}"`)
@@ -42,23 +42,6 @@ function prunedView(removals, { plannedDirs, mirrorAreas }) {
   }
 }
 
-// Finds every Mirror Area, Branch Version folder and Version folder under the root. It does not enter a Version
-// folder, but it does enter a Mirror Area, because another Area (maybe ours) can be nested inside.
-export function scan(docs, root) {
-  const invalid = []
-  const records = markerRecords(docs, root, root, (dir, error) => {
-    // An untouched version-shaped folder stays for the Area's write guards: a plain push contains a broken Area.
-    if (error.outsideRoot || !SEMVER_REGEX.test(path.posix.basename(dir).replace(/^v/, ''))) throw error
-    invalid.push({ dir, message: error.message })
-  })
-  return {
-    records, invalid,
-    mirrors: records.filter((record) => record.kind === 'Mirror'),
-    branches: records.filter((record) => record.kind === 'Branch'),
-    versions: records.filter((record) => record.kind === 'Version'),
-  }
-}
-
 function packageFolderGone(source, entry, name, checked) {
   if (!checked.has(entry)) {
     if (!hasTreeAt(source, 'HEAD', entry.packages)) {
@@ -71,7 +54,7 @@ function packageFolderGone(source, entry, name, checked) {
   return !hasTreeAt(source, 'HEAD', path.posix.join(entry.packages, name))
 }
 
-// A removal deletes a parent whole, so every Version folder under it goes too. The record scan covers damaged
+// A removal deletes a parent whole, so every Version folder under it goes too. Discovery reports the damaged
 // markers; an unmarked version-shaped child must also be refused, because no tag can rebuild it.
 function missingVersionChildren(docs, dir, plannedDirs) {
   const problems = []
@@ -85,8 +68,12 @@ function missingVersionChildren(docs, dir, plannedDirs) {
 }
 
 export function planPrune({ docs, source, root, repository, entries }) {
-  const { records, invalid, mirrors, branches, versions } = scan(docs, root)
-  const ownedDirs = new Set(records.filter((record) => record.source === repository).map((record) => record.dir))
+  const { claims, damaged } = discoverAreas(docs, root)
+  const versions = claims.filter((claim) => claim.kind === 'Version')
+  const branches = claims.filter((claim) => claim.kind === 'Branch')
+  const mirrors = claims.filter((claim) => claim.kind === 'Mirror')
+  const skipped = claims.filter((claim) => claim.kind === 'Skipped')
+  const ownedDirs = new Set(claims.filter((claim) => claim.source === repository).map((claim) => claim.dir))
   const mirrorAreas = new Map(entries.filter((entry) => entry.mode === 'mirror').map((entry) => [path.posix.join(root, entry.area), entry]))
   const releaseAreas = new Map(entries.filter((entry) => entry.mode === 'release').map((entry) => [path.posix.join(root, entry.area), entry]))
   const removals = []
@@ -169,15 +156,27 @@ export function planPrune({ docs, source, root, repository, entries }) {
       removals.push({ dir: branch.dir, areaDir, kind: 'package-gone', reason: `\`${entry.packages}/${name}\` is gone from the source repo` })
     }
   }
+  for (const record of skipped) {
+    const { areaDir } = record
+    if (releaseAreas.has(areaDir) || retiredAreas.has(areaDir) || !ownedDirs.has(areaDir)) continue
+    if (removals.some((removal) => removal.dir === areaDir)) continue
+    if (folderNames(path.join(docs, areaDir)).length > 0) {
+      retireTopFiles(areaDir)
+      continue
+    }
+    removals.push({ dir: areaDir, areaDir, ...areaRemoval(areaDir, 'release') })
+  }
   const plannedDirs = new Set([...removals.map((removal) => removal.dir), ...removedVersions])
   const isPruned = prunedView(removals, { plannedDirs, mirrorAreas: mirrors.map((mirror) => mirror.areaDir) })
   const affectedAreas = [
     ...[...removals, ...files].map((change) => change.areaDir),
-    ...records.filter((record) => isPruned(record.areaDir)).map((record) => record.areaDir),
+    ...claims.filter((claim) => isPruned(claim.areaDir)).map((claim) => claim.areaDir),
   ]
-  assertRecordOwners(records, affectedAreas, root, repository)
-  for (const damaged of invalid) {
-    if (isPruned(damaged.dir)) problems.push(damaged.message)
+  assertRecordOwners(claims, affectedAreas, root, repository)
+  const removed = (damagedClaim) => isPruned(damagedClaim.dir) ||
+    (damagedClaim.rel !== undefined && files.some((file) => file.rel === damagedClaim.rel))
+  for (const damagedClaim of damaged) {
+    if (removed(damagedClaim)) problems.push(damagedClaim.message)
   }
   for (const { dir } of removals) problems.push(...missingVersionChildren(docs, dir, plannedDirs))
   if (problems.length > 0) throw new FatalError([...new Set(problems)].join('\n'))
