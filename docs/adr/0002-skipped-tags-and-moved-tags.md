@@ -14,4 +14,4 @@ Repositories with many historical tags that cannot be published (retired package
 - **Plan mode** stays strictly read-only: a newly skipped tag stops being re-checked after the next Reconcile writes `.skipped-tags.json`.
 - `.skipped-tags.json` carries `source` so it participates in Area ownership checks and Prune even when a Release Area has only skipped tags and no Version folders; it is deleted when empty and fails the run if corrupted.
 - Existing Version markers without `sourceRevision` are stamped in place on Reconcile without rebuilding, and republished if a Release run fires for them.
-- If a previously published tag moves to a commit that fails to build or collect during Reconcile, the existing Version folder is kept and the tag is reported as skipped; a Release run fails as usual.
+- If a previously published tag moves to a commit that fails to build or collect during Reconcile, the existing Version folder is kept while the skip is recorded in `.skipped-tags.json` with the tag's new commit, so the next run reuses it instead of building the tag again; a Release run fails as usual.
