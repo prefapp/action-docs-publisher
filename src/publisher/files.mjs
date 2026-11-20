@@ -249,7 +249,12 @@ export function groupBy(items, keyFor) {
   return groups
 }
 
-export function assertCollectable(rel, from, versionDir) {
+export function assertCollectable(rel, from, versionDir, areaDir) {
+  // The Skipped tags file sits at the top of an Area, and a rewrite of it would leave the Area's recorded skips to a
+  // collect rule.
+  if (areaDir !== undefined && rel === path.posix.join(areaDir, SKIPPED_TAGS_FILE)) {
+    throw new FatalError(`collect from "${from}" would publish ${rel}: ${SKIPPED_TAGS_FILE} is the publisher's Skipped tags file`)
+  }
   if (path.posix.basename(rel) === '.meta.json') {
     throw new FatalError(
       `collect from "${from}" would publish ${rel}: .meta.json marks ${versionDir === undefined ? 'an Area' : 'a Version folder'}, which the publisher writes`,
@@ -271,8 +276,12 @@ export function folderNames(dir) {
 
 export const metaFile = (fields) => ({ content: JSON.stringify(fields, null, 2) + '\n' })
 
-// The names a rebuild generates at the top of an Area. Every other file there is an Area file of the entry.
-export const GENERATED_AREA_NAMES = new Set(['index.json', 'versions.json', '.meta.json'])
+// The Skipped tags file the publisher keeps at the top of a Release Area.
+export const SKIPPED_TAGS_FILE = '.skipped-tags.json'
+
+// The names a rebuild generates at the top of an Area. Every other file there is an Area file of the entry. The
+// Skipped tags file is one of them: the publisher owns it, and a run that cannot rewrite it leaves it alone.
+export const GENERATED_AREA_NAMES = new Set(['index.json', 'versions.json', '.meta.json', SKIPPED_TAGS_FILE])
 
 // `latest` is a generated name only where the rebuild writes the Latest folder: the top of an Area without
 // `packages`. Entry validation reserves the name there alone, so a named Area's `latest` is one of its Area files.

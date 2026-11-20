@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { SEMVER_REGEX } from './entries.mjs'
-import { FatalError, assertAreaWritable, assertRecordOwners, assertNoSymlinkPath, existingVersionFolders, folderNames, markerRecordAt, markerRecords, lstatOrNull, metaFile, put, readMarkerRecord, writeFile, writeSummary } from './files.mjs'
+import { FatalError, SKIPPED_TAGS_FILE, assertAreaWritable, assertRecordOwners, assertNoSymlinkPath, existingVersionFolders, folderNames, markerRecordAt, markerRecords, lstatOrNull, metaFile, put, readMarkerRecord, writeFile, writeSummary } from './files.mjs'
 import { scan } from './prune.mjs'
 import { docsRoot } from './root.mjs'
 
@@ -231,6 +231,9 @@ export function planSharedArea({ docs, root, entry, repository, branch, docsRepo
   if (entry.packages !== undefined) put(files, `${areaDir}/index.json`, metaFile({ [entry.area.split('/').at(-1)]: rows }))
   for (const name of lstatOrNull(path.join(docs, areaDir))?.isDirectory() ? fs.readdirSync(path.join(docs, areaDir)) : []) {
     const rel = `${areaDir}/${name}`
+    // The Skipped tags file belongs to the runs that read it: a rebuild of the shared files never deletes one, and a
+    // run that skips the whole Area keeps the docs copy.
+    if (name === SKIPPED_TAGS_FILE) continue
     if (!lstatOrNull(path.join(docs, rel))?.isDirectory() && !files.has(rel)) removals.push(rel)
   }
   try { assertAreaWritable(docs, areaDir, files, removals) } catch (error) {

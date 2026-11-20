@@ -37,6 +37,13 @@ import {
   writeSummary,
 } from './files.mjs'
 import { planSharedArea, snapshotAreaState, writeSharedArea } from './shared.mjs'
+import {
+  readSkippedTags,
+  reuseSkippedTags,
+  skippedTagsFile,
+  skippedTagsPath,
+  skippedTagsToRecord,
+} from './skipped.mjs'
 import { planBranchVersions, planVersion } from './release.mjs'
 import { classifyStagedEffects, publishWithRetry, sourceBranchMoved, syncToBranch } from './push.mjs'
 import { NO_PRUNE, applyPrune, planPrune, pruneSummary, stalePruneSummary } from './prune.mjs'
@@ -86,7 +93,8 @@ function cleanSource(source) {
 // The tags a reconcile can never publish are named without a checkout, and every tag it can publish carries the commit
 // it points at, which decides whether an already published Version folder is stale.
 function resolveTag(source, area, pkg) {
-  // A retired package's folders are pruned whatever its tags say.
+  // A retired package's folders are pruned whatever its tags say, so its tags are never read: the commit each one
+  // names is recorded with the skip, but nothing needs it here.
   if (pkg.note === 'retired') return
   if (!tagExists(source, pkg.tag)) {
     pkg.note ??= 'missing tag'
@@ -244,12 +252,24 @@ export function skippedReconcileLines({ sourceBranch, areaFilesSkipped, skipped,
   return lines
 }
 
-export function planReconcileWrites(docs, areas, { source, repository, root, sourceBranch, sourceMoved = false }) {
-  const report = { published: [], republished: [], moved: [], branches: [], kept: [], stamped: [], untagged: [], skipped: [], areaFilesSkipped: [], specStale: [], branchStale: [] }
+// `skippedTags` is the run that keeps the Area's Skipped tags file: a Reconcile reads it, reuses the skips whose
+// conditions still hold and writes it again. A Plan reads nothing and writes nothing, so it re-checks every tag.
+export function planReconcileWrites(docs, areas, { source, repository, root, sourceBranch, sourceMoved = false, skippedTags = false }) {
+  const report = { published: [], republished: [], moved: [], branches: [], kept: [], stamped: [], untagged: [], skipped: [], previouslySkipped: [], areaFilesSkipped: [], specStale: [], branchStale: [] }
   const writes = new Map()
   const written = []
+  const removals = []
   const revision = areas.some((area) => area.entry.publishSourceBranch === true) ? git(source, ['rev-parse', 'HEAD']) : null
   const planned = new Map(areas.map((area) => [area, versionsToWrite(docs, area, { source, repository, root, sourceMoved, report })]))
+  const skipped = skippedTags ? new Map(areas.map((area) => [area.areaDir, readSkippedTags(docs, area.areaDir)])) : null
+  if (skipped) {
+    for (const area of areas) {
+      reuseSkippedTags({
+        records: skipped.get(area.areaDir), pending: planned.get(area).pending,
+        entry: area.entry, areaDir: area.areaDir, report,
+      })
+    }
+  }
   readTags(source, root, [...planned.values()].flatMap(({ pending }) => pending), repository)
   for (const area of areas) {
     const files = new Map()
@@ -261,6 +281,9 @@ export function planReconcileWrites(docs, areas, { source, repository, root, sou
     for (const { rel, file } of stamps) put(files, rel, file)
     for (const { pkg, existing } of pending) {
       if (!pkg.files) {
+        // A tag whose Version folder the docs already hold is published, whatever this run says about it: its skip
+        // is never recorded, since the next Release for the tag would have to clear it again.
+        if (existing) pkg.published = true
         report.skipped.push(pkg)
         continue
       }
@@ -320,11 +343,20 @@ export function planReconcileWrites(docs, areas, { source, repository, root, sou
     } else {
       for (const [rel, file] of area.areaFiles) put(files, rel, file)
     }
+    // The Skipped tags file this run leaves: the tags it skipped and the state it skipped them under, so a later run
+    // need not check them again. A run that cannot publish the Area's files (a moved source branch, a race) leaves
+    // the docs copy as it is, and an Area with no skips left loses the file.
+    if (skipped && !skipReason) {
+      const rel = skippedTagsPath(area.areaDir)
+      const tags = skippedTagsToRecord({ packages: area.packages, report, entry: area.entry, source })
+      if (tags.size > 0) put(files, rel, skippedTagsFile({ source: repository, tags }))
+      else if (lstatOrNull(path.join(docs, rel))) removals.push(rel)
+    }
     for (const [rel, file] of files) put(writes, rel, file)
   }
   assertNoNestedWrites(docs, written, root)
   for (const rel of writes.keys()) assertNoSymlinkPath(docs, rel)
-  return { areas: written, files: writes, report }
+  return { areas: written, files: writes, removals, report }
 }
 
 // Plan mode checks placement per Area, so placement and shared-file problems stay in Area order.
@@ -424,7 +456,7 @@ export function publishReconcile({ args, repository, root }) {
       // stops here, before the prune deletes anything and before it writes into any Area.
       const pruned = applyPrune(args.docs, prune, root)
       const reconcile = planReconcileWrites(args.docs, areas, {
-        source: args.source, repository, root, sourceBranch: args['source-branch'], sourceMoved,
+        source: args.source, repository, root, sourceBranch: args['source-branch'], sourceMoved, skippedTags: true,
       })
       const writable = planMirrorWrites({ args, repository, mirrors, releaseFiles: reconcile.files })
       const writes = [...reconcile.areas, ...writable]
@@ -442,16 +474,22 @@ export function publishReconcile({ args, repository, root }) {
         // A replaced folder can lose a file and gain none, so the folder itself counts as the Area's path.
         paths: [
           ...area.files.keys(), ...shared[index].files.keys(), ...shared[index].removals,
+          ...reconcile.removals.filter((rel) => rel.startsWith(`${area.areaDir}/`)),
           ...[...reconcile.report.republished, ...reconcile.report.moved, ...reconcile.report.branches.map((branch) => branch.dir)]
             .filter((dir) => dir.startsWith(`${area.areaDir}/`)),
         ],
       }))
       writeMirrors(args.docs, writable)
+      // A Skipped tags file the run leaves no tags for goes: the Areas it names are the only evidence it ever existed.
+      for (const rel of reconcile.removals) fs.rmSync(path.join(args.docs, rel), { force: true })
       for (const dir of [...reconcile.report.republished, ...reconcile.report.moved]) fs.rmSync(path.join(args.docs, dir), { recursive: true, force: true })
       // A Branch Version folder holds one build output: replacing it whole is what removes a file it no longer has.
       for (const branch of reconcile.report.branches) fs.rmSync(path.join(args.docs, branch.dir), { recursive: true, force: true })
       for (const [rel, file] of reconcile.files) writeFile(args.docs, rel, file)
-      return [...files.keys(), ...shared.flatMap((plan) => writeSharedArea(args.docs, plan)), ...pruned]
+      return [
+        ...reconcile.removals, ...files.keys(),
+        ...shared.flatMap((plan) => writeSharedArea(args.docs, plan)), ...pruned,
+      ]
     },
   })
   pruneSummary(changed ? committed.prune : prune, args.branch, changed)

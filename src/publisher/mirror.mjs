@@ -63,7 +63,7 @@ function planMirrors({ source, root, repository, entries, sourceRevision, source
       for (const file of collectFiles(source, rule)) {
         const rel = path.posix.join(areaDir, file.to)
         const from = path.relative(source, file.from)
-        assertCollectable(rel, from)
+        assertCollectable(rel, from, undefined, areaDir)
         put(files, rel, { content: file.content })
         rules.set(rel, `collect "${rule.from}" to "${rule.to}"`)
       }

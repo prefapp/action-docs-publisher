@@ -345,7 +345,7 @@ describe('manual runs remain compatible with release shared files', () => {
     expect(run.status).toBe(0)
     expect(git(checkout, 'symbolic-ref', '--short', 'HEAD')).toBe('main')
     const landed = readRemote(world)
-    expect(Object.keys(readTree(landed, AREA)).sort()).toEqual(['README.md', 'index.json'])
+    expect(Object.keys(readTree(landed, AREA)).sort()).toEqual(['.skipped-tags.json', 'README.md', 'index.json'])
     expect(run.summary).toContain('its content does not fit the entry (build failed in packages/alpha (exit 1))')
   })
 

@@ -33,6 +33,7 @@ import {
   writeSummary,
 } from './files.mjs'
 import { publishWithRetry, sourceBranchMoved } from './push.mjs'
+import { readSkippedTags, skippedTagsFile, skippedTagsPath } from './skipped.mjs'
 import { scan } from './prune.mjs'
 import { planSharedArea, snapshotAreaState, writeSharedArea } from './shared.mjs'
 
@@ -162,6 +163,18 @@ export function rebuildPackages({ source, docs, root, entry, branch, changed, ti
   })
 }
 
+// The tag a Release published leaves the Area's Skipped tags file: the docs hold its Version now. Returns the path
+// the attempt changed, or null when the file never named it.
+function clearSkippedTag(docs, areaDir, tag, repository) {
+  const tags = readSkippedTags(docs, areaDir)
+  if (!tags?.has(tag)) return null
+  tags.delete(tag)
+  const rel = skippedTagsPath(areaDir)
+  if (tags.size === 0) fs.rmSync(path.join(docs, rel), { force: true })
+  else writeFile(docs, rel, skippedTagsFile({ source: repository, tags }))
+  return rel
+}
+
 export function publishRelease({ args, release, repository, root }) {
   if (!tagExists(args.source, args.tag)) throw new FatalError(`tag ${args.tag} not found in ${args.source}`)
   const date = tagDate(args.source, args.tag)
@@ -266,6 +279,7 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
           if (!fresh) staleAreaFiles.add(area)
           else if (sourceMoved()) movedAreaFiles.add(area)
           plans.push({
+            area,
             version,
             plan: planSharedArea({
               docs: args.docs, root, entry: area.entry, repository, branch: args.branch,
@@ -283,9 +297,13 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
         fs.rmSync(path.join(args.docs, version.versionDir), { recursive: true, force: true })
         for (const [rel, file] of version.files) writeFile(args.docs, rel, file)
       }
+      // A Release never records a skip. It clears the tag it just published, so a later Reconcile does not check
+      // what the docs already hold, and leaves the file gone when it held nothing else.
+      const cleared = plans.map(({ area }) => clearSkippedTag(args.docs, area.areaDir, args.tag, repository))
       return [
         ...plans.flatMap(({ version }) => [...version.files.keys()]),
         ...plans.flatMap(({ plan }) => writeSharedArea(args.docs, plan)),
+        ...cleared.filter(Boolean),
       ]
     },
   })
