@@ -165,6 +165,73 @@ describe('release selection and collection', () => {
     expect(readTree(readRemote(world))).toEqual(published)
   })
 
+  test('fails a run whose tag origin no longer names, instead of publishing its local ref', () => {
+    const source = sourceWith()
+    // A delayed run holds the older tag commit, and origin drops the tag after a newer publish landed.
+    const delayed = cloneSource(world, source, 'delayed-release')
+    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# RETAGGED\n' }, 'move the tag')
+    git(source, 'tag', '--force', TAG)
+    expect(runPublisher(cloneDocs(world, 'docs-newer'), { source, tag: TAG }).status).toBe(0)
+    const published = readTree(readRemote(world))
+    const before = remoteCommitCount(world)
+    git(source, 'tag', '--delete', TAG)
+
+    const run = runPublisher(cloneDocs(world, 'docs-unanchored'), { source: delayed, tag: TAG })
+
+    expect(run.status).toBe(2)
+    expect(run.output).toContain(`refusing to publish \`${TAG}\`: origin holds no such tag`)
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(readTree(readRemote(world))).toEqual(published)
+    expect(readFile(readRemote(world), 'site/raw/features/alpha/1.0.0/intro.md')).toBe('# RETAGGED\n')
+  })
+
+  test('keeps an already published Version as it is when only the entry changed', () => {
+    const source = sourceWith()
+    expect(runPublisher(cloneDocs(world, 'docs-first'), { source, tag: TAG }).status).toBe(0)
+    const published = readTree(readRemote(world))
+    // The tag keeps its commit: only the entry's package folder moves, so the tag no longer holds the folder it names.
+    git(source, 'mv', 'packages', 'pkgs')
+    commitSource(source, entriesFile([releaseEntry({ packages: 'pkgs' })]), 'move the package folder in the entry')
+    const tagCommit = git(source, 'rev-parse', `refs/tags/${TAG}^{commit}`)
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world, 'docs-second'), { source, tag: TAG })
+
+    expect(git(source, 'rev-parse', `refs/tags/${TAG}^{commit}`)).toBe(tagCommit)
+    expect(run.status).toBe(0)
+    expect(run.summary).toContain(
+      `Already published \`${TAG}\` in area \`features\`: kept \`site/raw/features/alpha/1.0.0\` as it is.`,
+    )
+    expect(run.summary).not.toContain('no `pkgs/alpha` folder at the tag')
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(readTree(readRemote(world))).toEqual(published)
+  })
+
+  test('fails a moved published tag the prerelease filter would drop, before it reports a skip', () => {
+    const source = makeSource(world)
+    // `features` holds the folder but publishes no prereleases, so the tag reaches no publishable Area; `beta` holds
+    // this tag's Version from another commit and no folder at the tag any more.
+    releaseCommit(source, {
+      ...featureFiles('alpha'),
+      ...entriesFile([releaseEntry(), releaseEntry({ area: 'beta', packages: 'beta', prereleases: true })]),
+    }, 'alpha-v1.1.0-rc.1', DATE)
+    seedDocs(world, {
+      'site/raw/beta/alpha/1.1.0-rc.1/.meta.json': meta({
+        source: 'acme/source', tag: 'alpha-v1.1.0-rc.1', sourceRevision: 'b'.repeat(40), date: DATE, specHash: specHash(releaseEntry()),
+      }),
+      'site/raw/beta/alpha/1.1.0-rc.1/intro.md': '# older build\n',
+    })
+    const published = readTree(readRemote(world))
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world), { source, tag: 'alpha-v1.1.0-rc.1' })
+
+    expect(run.status).toBe(2)
+    expect(run.output).toContain('refusing to publish `alpha-v1.1.0-rc.1` over `site/raw/beta/alpha/1.1.0-rc.1`')
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(readTree(readRemote(world))).toEqual(published)
+  })
+
   test('refuses to roll back a newer publish when its clone holds an older tag', () => {
     const source = sourceWith()
     // A delayed run keeps the tag commit it planned from, while origin moves the tag on and a newer run publishes it.
@@ -198,6 +265,18 @@ describe('release selection and collection', () => {
     expect(run.output).toContain('invalid .skipped-tags.json: site/raw/features/.skipped-tags.json')
     expect(remoteCommitCount(world)).toBe(before)
     expect(readTree(readRemote(world))).toEqual(published)
+  })
+
+  test('fails on a malformed Skipped tags file in a candidate Area, even when it publishes no Version', () => {
+    const source = sourceWith(releaseEntry(), 'ghost-v1.0.0')
+    seedDocs(world, { 'site/raw/features/.skipped-tags.json': '{' })
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world), { source, tag: 'ghost-v1.0.0' })
+
+    expect(run.status).toBe(2)
+    expect(run.output).toContain('invalid .skipped-tags.json: site/raw/features/.skipped-tags.json')
+    expect(remoteCommitCount(world)).toBe(before)
   })
 
   test('fails a moved tag whose content no longer fits the entry, and commits nothing', () => {
