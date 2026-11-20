@@ -46,11 +46,14 @@ function prunedView(removals, { plannedDirs, mirrorAreas }) {
 
 // Every folder below the root that holds a Skipped tags file claims an Area there, whatever else it holds: a folder
 // with a Version or Branch Version marker beside the file is a claim too, and so is a hand-made folder at that path.
-// A damaged file is listed with the damaged markers, so Prune defers the ones it does not touch and stops on an Area
-// it would clear.
-function skippedRecords(docs, root, invalid) {
+// The walk stops at a Version folder: its content is a tag's build output, so a Skipped tags file a tag carries there
+// is content, never an Area claim. A damaged file is listed with the damaged markers, so Prune defers the ones it
+// does not touch and stops on an Area it would clear.
+function skippedRecords(docs, root, invalid, published) {
   const records = []
   const walk = (dir) => {
+    // `published` names the folders no walk enters: a Version folder and a folder whose marker is damaged.
+    if (published.has(dir)) return
     try {
       const record = skippedRecordAt(docs, dir)
       if (record) records.push(record)
@@ -77,7 +80,10 @@ export function scan(docs, root) {
     if (error.outsideRoot || !SEMVER_REGEX.test(path.posix.basename(dir).replace(/^v/, ''))) throw error
     invalid.push({ dir, message: error.message })
   })
-  const skipped = skippedRecords(docs, root, invalid)
+  const skipped = skippedRecords(docs, root, invalid, new Set([
+    ...markers.filter((record) => record.kind === 'Version').map((record) => record.dir),
+    ...invalid.map((entry) => entry.dir),
+  ]))
   const records = [...markers, ...skipped]
   return {
     skipped, records, invalid,
@@ -199,12 +205,15 @@ export function planPrune({ docs, source, root, repository, entries }) {
   }
   // A Release Area the Skipped tags file alone claims has no Version or Branch Version folder to retire it: the file
   // names the repo that owns the Area, so a retired Area goes with it, its top-level Area files included. A folder
-  // beside the file is not the file's to delete, so it stays and the Area is left for a run that knows what it is.
+  // beside the file is not the file's to delete: it stays, and only the top-level files this repo wrote go.
   for (const record of skipped) {
     const { areaDir } = record
     if (releaseAreas.has(areaDir) || retiredAreas.has(areaDir) || !ownedDirs.has(areaDir)) continue
     if (removals.some((removal) => removal.dir === areaDir)) continue
-    if (folderNames(path.join(docs, areaDir)).length > 0) continue
+    if (folderNames(path.join(docs, areaDir)).length > 0) {
+      retireTopFiles(areaDir)
+      continue
+    }
     removals.push({ dir: areaDir, areaDir, ...areaRemoval(areaDir, 'release') })
   }
   const plannedDirs = new Set([...removals.map((removal) => removal.dir), ...removedVersions])

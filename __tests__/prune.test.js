@@ -488,18 +488,20 @@ describe('pruning an Area whose only record is the Skipped tags file', () => {
     expect(run.summary).not.toContain('Pruned')
   })
 
-  test('leaves the Area when the file sits beside a folder it did not make', () => {
+  test('retires its top-level files when an unrelated child folder sits beside them', () => {
     const source = makeSource(world)
     releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
-    seedDocs(world, { ...fileOnlyArea(CRDS), [`${CRDS}/by-hand/notes.md`]: '# By hand\n' })
+    seedDocs(world, { ...fileOnlyArea(CRDS), [`${CRDS}/README.md`]: '# CRDS\n', [`${CRDS}/by-hand/notes.md`]: '# By hand\n' })
 
     const run = runManual(source)
 
     expect(run.status).toBe(0)
     const landed = readRemote(world)
-    expect(readFile(landed, `${CRDS}/${SKIPPED}`)).toBe(skippedFile(REPO))
+    // The file claimed the Area for this repo, so its own top-level files go; the folder it did not write stays.
+    expect(exists(landed, `${CRDS}/${SKIPPED}`)).toBe(false)
+    expect(exists(landed, `${CRDS}/README.md`)).toBe(false)
     expect(readFile(landed, `${CRDS}/by-hand/notes.md`)).toBe('# By hand\n')
-    expect(run.summary).not.toContain('Pruned')
+    expect(run.summary).toContain('Pruned from `main`')
   })
 
   test('never deletes a file another repo wrote, and leaves the Area standing', () => {
@@ -549,17 +551,17 @@ describe('pruning an Area whose only record is the Skipped tags file', () => {
     expect(exists(readRemote(world), `${FEATURES}/alpha/1.0.0/.meta.json`)).toBe(true)
   })
 
-  test('stops when another repo claims a Version folder it would prune by placing a Skipped tags file there', () => {
+  test('does not treat a Skipped tags file inside a Version folder as an Area claim', () => {
     const source = publishedSource()
+    // A tag's own content can carry the file's name: inside a Version folder it is that tag's content, not an Area.
     seedDocs(world, { [`${FEATURES}/alpha/1.0.0/${SKIPPED}`]: skippedFile('other/repo') })
     commitSource(source, entriesFile([]), 'drop the features entry')
-    const commits = remoteCommitCount(world)
 
     const run = runManual(source)
 
-    expect(run.status).toBe(2)
-    expect(run.output).toContain('Area "features/alpha/1.0.0" belongs to other/repo, but this repo is acme/source. Choose another Area.')
-    expect(remoteCommitCount(world)).toBe(commits)
-    expect(exists(readRemote(world), `${FEATURES}/alpha/1.0.0/.meta.json`)).toBe(true)
+    expect(run.status).toBe(0)
+    const landed = readRemote(world)
+    expect(exists(landed, FEATURES)).toBe(false)
+    expect(run.summary).toContain(`- Pruned \`${FEATURES}/alpha\`, \`${FEATURES}/beta\`: its entry is gone from docs_publisher.yaml.`)
   })
 })
