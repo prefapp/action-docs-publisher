@@ -115,8 +115,7 @@ function recordReleaseChanges({ args, areas, report, add }) {
     for (const line of skippedReconcileLines({
       sourceBranch: args['source-branch'],
       areaFilesSkipped: report.areaFilesSkipped.filter(({ dir }) => dir === area.areaDir),
-      skipped: report.skipped.filter((pkg) => area.packages.includes(pkg)),
-      previouslySkipped: report.previouslySkipped.filter(({ areaDir }) => areaDir === area.areaDir),
+      skips: report.skips.filter((skip) => skip.areaDir === area.areaDir),
       collapse: true,
     })) add(area.areaDir, line)
   }
