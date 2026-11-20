@@ -341,6 +341,26 @@ describe('a push that publishes a mirror entry', () => {
     expect(readFile(landed, `${damaged}/notes.md`)).toBe('# Notes\n')
   })
 
+  test.each([
+    ['mirror content that is no Skipped tags file', '{"note":"mirror content"}\n'],
+    ['mirror content shaped like a Skipped tags file', `${JSON.stringify({
+      source: 'other/repo',
+      tags: { 'demo-v0.9.0': { sourceRevision: 'b'.repeat(40), reason: 'prerelease' } },
+    }, null, 2)}\n`],
+  ])('refreshes a Mirror Area whose own content holds a .skipped-tags.json file (%s)', (_label, content) => {
+    const contentPath = `${CORE_DOCS}/data/.skipped-tags.json`
+    const source = sourceWith({ ...CORE_FILES, 'docs/data/.skipped-tags.json': content })
+    expect(runPublisher(cloneDocs(world, 'first'), { source }).status).toBe(0)
+    expect(readFile(readRemote(world), contentPath)).toBe(content)
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world, 'second'), { source })
+
+    expect(run.status).toBe(0)
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(readFile(readRemote(world), contentPath)).toBe(content)
+  })
+
   test.each([false, true])('makes no commit for identical content (manual: %s)', (reconcile) => {
     const source = sourceWith()
     expect(runPublisher(cloneDocs(world, 'first'), { source }).status).toBe(0)
