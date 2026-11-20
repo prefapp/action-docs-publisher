@@ -391,6 +391,43 @@ describe('keeping the Skipped tags file current', () => {
     expect(readJson(landed, SKIPPED).tags['alpha-v1.0.0'].sourceRevision).toBe(revision(source, 'alpha-v1.0.0'))
   })
 
+  test('reuses a moved published tag\'s record without inventing a detail it never recorded', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), 'packages/alpha/BUILD_OK': '', ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    expect(runReconcile(world, source).status).toBe(0)
+    expect(exists(readRemote(world), `${AREA}/alpha/1.0.0/.meta.json`)).toBe(true)
+    // The tag moves onto an unfit commit, and the record the run reads carries no reason line.
+    commitSource(source, { 'packages/alpha/schema.json': null }, 'move the tag onto an unfit commit')
+    git(source, 'tag', '-f', 'alpha-v1.0.0')
+    seedDocs(world, {
+      [SKIPPED]: emptySkipFile({
+        'alpha-v1.0.0': {
+          sourceRevision: revision(source, 'alpha-v1.0.0'),
+          reason: 'content',
+          specHash: specHash(readEntries(join(source, '.github/docs_publisher.yaml'))[0]),
+        },
+      }),
+    })
+
+    const run = runReconcile(world, source)
+
+    expect(run.status).toBe(0)
+    let landed = readRemote(world)
+    expect(exists(landed, `${AREA}/alpha/1.0.0/.meta.json`)).toBe(true)
+    // The record is reused as it is: the run adds no reason it never derived, and reports no wording of its own.
+    expect(readJson(landed, SKIPPED).tags['alpha-v1.0.0'].detail).toBeUndefined()
+    expect(run.summary).toContain('- 1 previously skipped tag unchanged.')
+    expect(run.summary).not.toContain('(moved)')
+
+    const again = runReconcile(world, source)
+
+    expect(again.status).toBe(0)
+    expect(again.summary).not.toContain('(moved)')
+    expect(again.summary).toContain('- 1 previously skipped tag unchanged.')
+    landed = readRemote(world)
+    expect(exists(landed, `${AREA}/alpha/1.0.0/.meta.json`)).toBe(true)
+  })
+
   test('treats a tag deleted on origin as gone, however the checkout still holds it', () => {
     const counter = join(world.base, 'builds.log')
     const source = contentSkipSource(counter)

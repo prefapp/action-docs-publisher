@@ -101,7 +101,9 @@ export function reuseSkippedTags({ records, pending, entry, areaDir, report }) {
     if (record.reason !== (pkg.note ?? 'content')) continue
     // A spec-sensitive skip is the same skip only while the entry still hashes the same.
     if (SPEC_SENSITIVE_REASONS.has(record.reason) && record.specHash !== specHash(entry)) continue
-    if (record.reason === 'content' && !pkg.note && record.detail !== undefined) pkg.reason = record.detail
+    // A `content` record stands in for the build that would have derived the reason, so the record's own detail is
+    // the only wording this run may report: a record that carries none leaves the skip without one.
+    if (record.reason === 'content' && !pkg.note) pkg.reason = record.detail
     pkg.note = record.reason
     report.previouslySkipped.push({ areaDir, tag: pkg.tag, reason: pkg.note })
   }
