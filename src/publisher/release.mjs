@@ -25,14 +25,13 @@ import {
   runBuild,
   staleAreaFilesSummary,
   tagDate,
-  tagExists,
-  tagRevision,
+  tagCommit,
   markerRecordAt,
   withTagWorktree,
   writeFile,
   writeSummary,
 } from './files.mjs'
-import { publishWithRetry, sourceBranchMoved } from './push.mjs'
+import { publishWithRetry, originTagRevision, sourceBranchMoved, syncToBranch } from './push.mjs'
 import { readSkippedTags, skippedTagsFile, skippedTagsPath } from './skipped.mjs'
 import { scan } from './prune.mjs'
 import { planSharedArea, snapshotAreaState, writeSharedArea } from './shared.mjs'
@@ -176,12 +175,27 @@ function clearSkippedTag(docs, areaDir, tag, repository) {
 }
 
 export function publishRelease({ args, release, repository, root }) {
-  if (!tagExists(args.source, args.tag)) throw new FatalError(`tag ${args.tag} not found in ${args.source}`)
+  const sourceRevision = tagCommit(args.source, args.tag)
+  if (sourceRevision === null) throw new FatalError(`tag ${args.tag} not found in ${args.source}`)
   const date = tagDate(args.source, args.tag)
-  const sourceRevision = tagRevision(args.source, args.tag)
   return withTagWorktree(args.source, args.tag, (tagSource) => publishAtTag(
     { args, release, repository, root, date, tagSource, sourceRevision },
   ))
+}
+
+// The Version folder a tag publishes into this entry's Area, whether or not the tag holds the package folder.
+function tagVersionDir(root, entry, name, version) {
+  return path.posix.join(root, entry.area, ...(name ? [name] : []), version)
+}
+
+// A tag that moved to a commit without its package folder leaves the Version folder the docs already hold without a
+// rebuild. Nothing can replace those bytes from the tag, so the Release stops instead of reporting a skip.
+function assertNoKeptMovedTag({ docs, root, repository, tag, missing }) {
+  const kept = missing.filter(({ dir }) => publishedMarker(docs, root, dir, repository)?.tag === tag)
+  if (kept.length === 0) return
+  const problems = kept.map(({ entry, name, dir }) =>
+    `refusing to publish \`${tag}\` over \`${dir}\`: the tag points at a commit without the \`${entry.packages}/${name}\` folder, and the docs hold its Version. Its bytes are kept.`)
+  throw new FatalError([...new Set(problems)].join('\n'))
 }
 
 // The marker of a Version folder this repo published, or null when the folder is not ours. A release-triggered
@@ -204,18 +218,32 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
     assertNoSymlinkAncestors(tagSource, rel)
     return lstatOrNull(path.join(tagSource, rel))?.isDirectory() === true
   })
-  for (const entry of candidates) {
-    if (!releases.includes(entry)) writeSummary(
-      `Skipped \`${args.tag}\` for area \`${entry.area}\`: no \`${entry.packages}/${folders.get(entry)}\` folder at the tag.`,
-    )
+  // The Areas whose package folder the tag does not hold. Their Version folders, if the docs hold them, stay as they
+  // are: assertNoKeptMovedTag stops the run when one of them is this tag's. The skip is only reported once the run
+  // knows it has nothing to keep.
+  const missing = candidates.filter((entry) => !releases.includes(entry)).map((entry) => ({
+    entry, name: folders.get(entry), dir: tagVersionDir(root, entry, folders.get(entry), release.version),
+  }))
+  const reportMissing = () => {
+    for (const { entry, name } of missing) {
+      writeSummary(`Skipped \`${args.tag}\` for area \`${entry.area}\`: no \`${entry.packages}/${name}\` folder at the tag.`)
+    }
   }
   if (releases.length === 0) {
+    // A tag that moved off its package folder leaves the Version the docs already hold with nothing to rebuild it
+    // from, so the run stops instead of reporting a skip over bytes it cannot replace.
+    if (missing.length > 0) {
+      syncToBranch(args.docs, args.branch)
+      assertNoKeptMovedTag({ docs: args.docs, root, repository, tag: args.tag, missing })
+    }
+    reportMissing()
     // With candidates, the per-area lines above already say why; the generic hint is only for "no entry at all".
     if (candidates.length === 0) writeSummary(`Skipped \`${args.tag}\`: no release entry publishes it. Add entries to \`.github/docs_publisher.yaml\`.`)
     return { changed: false, commitSha: null }
   }
   const published = releases.filter((entry) => entry.prereleases || !release.prerelease)
   if (published.length === 0) {
+    reportMissing()
     writeSummary(`Skipped \`${args.tag}\`: a prerelease is published only by an entry with \`prereleases: true\`.`)
     return { changed: false, commitSha: null }
   }
@@ -225,7 +253,7 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
     return {
       entry,
       areaDir,
-      versionDir: path.posix.join(areaDir, ...(name ? [name] : []), release.version),
+      versionDir: tagVersionDir(root, entry, name, release.version),
       areaFiles: readAreaFiles(args.source, areaDir, entry),
       state: null,
     }
@@ -248,11 +276,36 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
       // One fetch per attempt, made only once a published Area's Area files need the answer.
       let moved
       const sourceMoved = () => (moved ??= sourceBranchMoved(args.source, args['source-branch']))
+      // The docs record the commit a Version was built from, so the run has to publish that same commit: a clone that
+      // holds an older tag than origin would otherwise roll a newer publish back. Origin is asked on every attempt,
+      // because the tag can move while the run waits to push.
+      const onOrigin = originTagRevision(args.source, args.tag)
+      if (onOrigin !== null && onOrigin !== sourceRevision) {
+        throw new FatalError(
+          `refusing to publish \`${args.tag}\`: origin names ${onOrigin}, but this run built ${sourceRevision}. A newer publish may already hold the docs; publish the tag again from the commit it names.`,
+        )
+      }
       // A Branch Version marker names its release Area, so it can prove the Area belongs to another repo: a release
       // stops here, before it writes a Version folder or an Area file.
       try { assertRecordOwners(scan(args.docs, root).records, areas.map((area) => area.areaDir), root, repository) } catch (error) {
         if (!(error instanceof FatalError)) throw error
         problems.push(error.message)
+      }
+      // A Skipped tags file this repo's own Reconcile wrote has to be readable before the Release takes it away: a
+      // damaged one is a failure here, whatever this attempt decides about the Version folder.
+      for (const area of areas) {
+        try { readSkippedTags(args.docs, area.areaDir) } catch (error) {
+          if (!(error instanceof FatalError)) throw error
+          problems.push(error.message)
+        }
+      }
+      // Only this attempt's docs branch can say whether a Version of the tag is already there, so the missing-folder
+      // Areas are read here, before the write, next to it.
+      if (missing.length > 0) {
+        try { assertNoKeptMovedTag({ docs: args.docs, root, repository, tag: args.tag, missing }) } catch (error) {
+          if (!(error instanceof FatalError)) throw error
+          problems.push(error.message)
+        }
       }
       for (const area of areas) {
         // The freshness reference is the docs state the first attempt sees, right after it synced the branch.
@@ -312,6 +365,7 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
   }
   for (const area of staleAreaFiles) keptAreaFilesSummary(area.areaDir, 'this release')
   for (const area of movedAreaFiles) staleAreaFilesSummary(area.areaDir, args['source-branch'])
+  reportMissing()
   if (kept.size === areas.length) return { changed, commitSha }
   writeSummary(changed
     ? `Published \`${args.tag}\` to \`${args.branch}\` under \`${areas.find((area) => !kept.has(area)).versionDir}\`.`

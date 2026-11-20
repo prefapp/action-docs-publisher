@@ -1,6 +1,6 @@
 
 import path from 'node:path'
-import { FatalError, git, gitRemote, gitStatus, lstatOrNull, trackedPaths } from './files.mjs'
+import { FatalError, git, gitRemote, gitStatus, lstatOrNull, tagRevision, trackedPaths } from './files.mjs'
 
 const MAX_PUSH_ATTEMPTS = 5
 
@@ -28,6 +28,23 @@ export function sourceBranchMoved(source, branch) {
   const tip = gitStatus(source, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}`])
   if (tip.status !== 0) return false
   return tip.stdout.trim() !== git(source, ['rev-parse', 'HEAD'])
+}
+
+// The commit a tag names on origin, or null when origin holds no such tag. A delayed run's clone can hold an older
+// tag than the one that published the docs, so the run asks origin instead of trusting its own ref; a checkout with no
+// origin remote has no other answer than the ref it holds.
+export function originTagRevision(source, tag) {
+  const remotes = gitStatus(source, ['remote'])
+  const hasOrigin = remotes.status === 0 && remotes.stdout.split('\n').map((name) => name.trim()).includes('origin')
+  if (!hasOrigin) return tagRevision(source, tag)
+  const result = gitRemote(source, ['ls-remote', '--tags', 'origin', `refs/tags/${tag}`, `refs/tags/${tag}^{}`])
+  if (result.status !== 0) throw new FatalError(`could not read tag "${tag}" from origin: ${result.stderr.trim()}`)
+  const refs = result.stdout.split('\n').map((line) => line.split('\t')).filter(([commit, ref]) => commit && ref)
+  // An annotated tag is listed twice: the tag object, and the commit it peels to. The commit is the identity the docs
+  // record, so the peeled line wins wherever it is there.
+  const peeled = refs.find(([, ref]) => ref === `refs/tags/${tag}^{}`)
+  const direct = refs.find(([, ref]) => ref === `refs/tags/${tag}`)
+  return (peeled ?? direct)?.[0] ?? null
 }
 
 // A rebuild or a prune can delete a path git never tracked, so only the paths git knows about are staged.

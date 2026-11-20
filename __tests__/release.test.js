@@ -148,6 +148,58 @@ describe('release selection and collection', () => {
     expect(exists(landed, 'site/raw/features/alpha/1.0.0/extra.md')).toBe(false)
   })
 
+  test('fails a published tag that moved to a commit without its package folder, and keeps the bytes', () => {
+    const source = sourceWith()
+    expect(runPublisher(cloneDocs(world, 'docs-first'), { source, tag: TAG }).status).toBe(0)
+    const published = readTree(readRemote(world))
+    commitSource(source, { 'packages/alpha': null }, 'move the tag off the package folder')
+    git(source, 'tag', '--force', TAG)
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world, 'docs-second'), { source, tag: TAG })
+
+    expect(run.status).toBe(2)
+    expect(run.output).toContain(`refusing to publish \`${TAG}\` over \`site/raw/features/alpha/1.0.0\``)
+    expect(run.output).toContain('the docs hold its Version')
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(readTree(readRemote(world))).toEqual(published)
+  })
+
+  test('refuses to roll back a newer publish when its clone holds an older tag', () => {
+    const source = sourceWith()
+    // A delayed run keeps the tag commit it planned from, while origin moves the tag on and a newer run publishes it.
+    const delayed = cloneSource(world, source, 'delayed-release')
+    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# RETAGGED\n' }, 'move the tag')
+    git(source, 'tag', '--force', TAG)
+    const winner = runPublisher(cloneDocs(world, 'docs-newer'), { source, tag: TAG })
+    const published = readTree(readRemote(world))
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world, 'docs-stale'), { source: delayed, tag: TAG })
+
+    expect(winner.status).toBe(0)
+    expect(run.status).toBe(2)
+    expect(run.output).toContain(`refusing to publish \`${TAG}\`: origin names`)
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(readTree(readRemote(world))).toEqual(published)
+    expect(readFile(readRemote(world), 'site/raw/features/alpha/1.0.0/intro.md')).toBe('# RETAGGED\n')
+  })
+
+  test('fails on a malformed Skipped tags file in the Area, even when the Version is unchanged', () => {
+    const source = sourceWith()
+    expect(runPublisher(cloneDocs(world, 'docs-first'), { source, tag: TAG }).status).toBe(0)
+    seedDocs(world, { 'site/raw/features/.skipped-tags.json': '{' })
+    const before = remoteCommitCount(world)
+    const published = readTree(readRemote(world))
+
+    const run = runPublisher(cloneDocs(world, 'docs-second'), { source, tag: TAG })
+
+    expect(run.status).toBe(2)
+    expect(run.output).toContain('invalid .skipped-tags.json: site/raw/features/.skipped-tags.json')
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(readTree(readRemote(world))).toEqual(published)
+  })
+
   test('fails a moved tag whose content no longer fits the entry, and commits nothing', () => {
     const source = sourceWith()
     expect(runPublisher(cloneDocs(world, 'docs-first'), { source, tag: TAG }).status).toBe(0)
