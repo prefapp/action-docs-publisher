@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { SEMVER_REGEX, areaProblem, matchTag } from './entries.mjs'
+import { GENERATED_AREA_NAMES, SKIPPED_TAGS_FILE } from './area-names.mjs'
 import { docsRoot } from './root.mjs'
 
 export class FatalError extends Error {}
@@ -275,13 +276,6 @@ export function folderNames(dir) {
 }
 
 export const metaFile = (fields) => ({ content: JSON.stringify(fields, null, 2) + '\n' })
-
-// The Skipped tags file the publisher keeps at the top of a Release Area.
-export const SKIPPED_TAGS_FILE = '.skipped-tags.json'
-
-// The names a rebuild generates at the top of an Area. Every other file there is an Area file of the entry. The
-// Skipped tags file is one of them: the publisher owns it, and a run that cannot rewrite it leaves it alone.
-export const GENERATED_AREA_NAMES = new Set(['index.json', 'versions.json', '.meta.json', SKIPPED_TAGS_FILE])
 
 // `latest` is a generated name only where the rebuild writes the Latest folder: the top of an Area without
 // `packages`. Entry validation reserves the name there alone, so a named Area's `latest` is one of its Area files.
@@ -643,12 +637,19 @@ export function commitDate(source, revision) {
   return isoDate(git(source, ['show', '-s', '--format=%cI', revision]))
 }
 
-export function tagExists(source, tag) {
-  return gitStatus(source, ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}^{commit}`]).status === 0
+// The commit a tag points at, or null when this checkout holds no such tag. `^{commit}` peels an annotated tag to
+// the commit it names, so a tag recreated or moved to another commit reads as a different revision whatever the tag
+// object around it. One read answers both questions, so a caller never asks twice and reads two different commits.
+export function tagCommit(source, tag) {
+  const result = gitStatus(source, ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}^{commit}`])
+  return result.status === 0 ? result.stdout.trim() : null
 }
 
-// The commit a tag points at. `^{commit}` peels an annotated tag to the commit it names, so a tag recreated or moved
-// to another commit reads as a different revision whatever the tag object around it.
+export function tagExists(source, tag) {
+  return tagCommit(source, tag) !== null
+}
+
+// The commit a tag points at. A caller that has to tell a missing tag from a moved one reads `tagCommit` instead.
 export function tagRevision(source, tag) {
   return git(source, ['rev-parse', '--verify', `refs/tags/${tag}^{commit}`])
 }

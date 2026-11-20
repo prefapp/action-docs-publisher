@@ -3,7 +3,8 @@ import fs from 'node:fs'
 import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { parse as parseYaml } from 'yaml'
-import { FatalError, GLOB_CHARS, SKIPPED_TAGS_FILE, namesGitPath } from './files.mjs'
+import { FatalError, GLOB_CHARS, namesGitPath } from './files.mjs'
+import { GENERATED_AREA_NAMES } from './area-names.mjs'
 
 // Only settings that shape Version folder content belong in this hash.
 export function specHash({ collect, build, packages }) {
@@ -210,7 +211,7 @@ function validatePaths(list, fail) {
 // The files the publisher generates at the top of an Area. A run never publishes an Area file over one of them, and
 // no Area, package folder or Branch Version folder may take their name.
 function isSharedFileName(name) {
-  return name === 'index.json' || name === 'versions.json' || name === '.meta.json' || name === SKIPPED_TAGS_FILE
+  return GENERATED_AREA_NAMES.has(name)
 }
 
 function isReservedName(name) {
