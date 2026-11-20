@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from '@jest/globals'
-import { mkdirSync, readFileSync, symlinkSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   cloneDocs, cloneSource, commitSource, entriesFile, exists, featureFiles, git, makeDocsRemote,
   makeSource, mirrorEntry, readFile, readJson, readRemote, readTree, releaseCommit, releaseEntry,
-  remoteCommitCount, renderedScript, runPublisher, runReconcile, seedDocs, write,
+  rejectPushes, remoteCommitCount, renderedScript, runPublisher, runReconcile, seedDocs, write,
 } from '../test/harness.mjs'
 
 const { readEntries, specHash } = await import(pathToFileURL(renderedScript('entries.mjs')).href)
@@ -309,6 +309,28 @@ describe('keeping the Skipped tags file current', () => {
     expect(run.status).toBe(0)
     expect(buildCount(counter)).toBe(builds)
     expect(Object.keys(readJson(readRemote(world), SKIPPED).tags)).toEqual(['alpha-v1.0.0'])
+  })
+
+  test('drops a tag origin deleted during a rejected push, instead of publishing it on the retry', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    const checkout = cloneSource(world, source, 'checkout-before-delete')
+    const docs = cloneDocs(world, 'docs-retry')
+    // The first attempt's push is rejected, and by then origin has dropped the tag: only the retry's fetch can tell
+    // this checkout that the ref it planned from is gone.
+    rejectPushes(world, 1)
+    write(docs, { '.git/hooks/pre-push': `#!/bin/sh\ngit -C "${source}" tag --delete alpha-v1.0.0 >/dev/null 2>&1\nexit 0\n` })
+    chmodSync(join(docs, '.git/hooks/pre-push'), 0o755)
+
+    const run = runPublisher(docs, { source: checkout, reconcile: true })
+
+    expect(run.status).toBe(0)
+    expect(run.output).toContain('Push to "main" rejected (attempt 1 of 5)')
+    expect(run.summary).toContain('- Skipped `alpha-v1.0.0`: no such tag.')
+    const landed = readRemote(world)
+    expect(exists(landed, `${AREA}/alpha/1.0.0/.meta.json`)).toBe(false)
+    expect(exists(landed, `${AREA}/alpha/1.0.0/intro.md`)).toBe(false)
+    expect(exists(landed, SKIPPED)).toBe(false)
   })
 
   test('removes the file when a later run publishes the last skipped tag', () => {

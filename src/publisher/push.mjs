@@ -21,7 +21,9 @@ export function syncToBranch(docs, branch) {
 export function sourceBranchMoved(source, branch) {
   const remotes = gitStatus(source, ['remote'])
   if (remotes.status !== 0 || !remotes.stdout.split('\n').map((name) => name.trim()).includes('origin')) return false
-  const fetch = gitRemote(source, ['fetch', '--quiet', '--force', '--tags', 'origin'])
+  // `--prune-tags` makes origin the only list of tags, on every attempt: a tag deleted there is gone from this clone
+  // too, so no retry republishes from a ref the remote no longer has.
+  const fetch = gitRemote(source, ['fetch', '--quiet', '--force', '--tags', '--prune', '--prune-tags', 'origin'])
   if (fetch.status !== 0) {
     throw new FatalError(`could not fetch the source branch "${branch}" from origin: ${fetch.stderr.trim()}`)
   }
