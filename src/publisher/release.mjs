@@ -1,7 +1,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { folderForTagName, nestedRepoPath, readEntries, readTagNames, specHash } from './entries.mjs'
+import { nestedRepoPath, readEntries, specHash } from './entries.mjs'
 import {
   FatalError,
   TagContentError,
@@ -35,6 +35,7 @@ import { publishWithRetry, originTagRevision, sourceBranchMoved, syncToBranch } 
 import { applySkippedTagsChange, planTagClear, readSkippedTags } from './skipped.mjs'
 import { discoverAreas } from './discovery.mjs'
 import { planSharedArea, snapshotAreaState, writeSharedArea } from './shared.mjs'
+import { versionTargeting } from './version-folders.mjs'
 
 // One package folder's collected content, keyed under `dir`. A Version folder and a Branch Version folder hold the
 // same build output and differ only in their marker.
@@ -63,13 +64,14 @@ function collectPackage({ source, entry, name, dir, marker }) {
   return files
 }
 
-export function planVersion({ source, root, entry, release, repository, date, tag, sourceRevision }) {
-  const versionDir = path.posix.join(root, entry.area, ...(release.name ? [release.name] : []), release.version)
+// A tag's Version folder, built from the target the Version folder targeting module resolved: this module decides the
+// bytes and the marker, not where the folder goes.
+export function planVersion({ source, entry, target, repository, date, tag, sourceRevision }) {
   const files = collectPackage({
-    source, entry, name: release.name, dir: versionDir,
+    source, entry, name: target.name, dir: target.versionDir,
     marker: { source: repository, tag, sourceRevision, date, specHash: specHash(entry) },
   })
-  return { versionDir, name: release.name, version: release.version, files }
+  return { versionDir: target.versionDir, name: target.name, version: target.version, files }
 }
 
 // The folder a Branch Version is published into: the Area, the package name when the entry has packages, and the
@@ -171,11 +173,6 @@ export function publishRelease({ args, release, repository, root }) {
   ))
 }
 
-// The Version folder a tag publishes into this entry's Area, whether or not the tag holds the package folder.
-function tagVersionDir(root, entry, name, version) {
-  return path.posix.join(root, entry.area, ...(name ? [name] : []), version)
-}
-
 // A Version folder the docs hold for a tag whose package folder the tag itself no longer carries. A marker that names
 // this run's commit is the tag's own bytes, so the Version stays as it is whatever the entry names today. A marker
 // built from another commit, or a legacy marker that names none, is a Version the tag can no longer produce, and the
@@ -184,7 +181,7 @@ function missingTagVersions({ docs, root, repository, tag, sourceRevision, missi
   const kept = []
   const moved = []
   for (const area of missing) {
-    const marker = publishedMarker(docs, root, area.dir, repository)
+    const marker = publishedMarker(docs, root, area.versionDir, repository)
     if (marker?.tag !== tag) continue
     if (marker.sourceRevision === sourceRevision) kept.push(area)
     else moved.push(area)
@@ -195,8 +192,8 @@ function missingTagVersions({ docs, root, repository, tag, sourceRevision, missi
 // A Version the tag can no longer produce has nothing in the tag that could replace it, so the Release stops over the
 // bytes the docs hold instead of reporting a skip.
 function movedTagProblems(tag, moved) {
-  return [...new Set(moved.map(({ entry, name, dir }) =>
-    `refusing to publish \`${tag}\` over \`${dir}\`: the tag points at a commit without the \`${entry.packages}/${name}\` folder, and the docs hold its Version. Its bytes are kept.`))]
+  return [...new Set(moved.map(({ entry, name, versionDir }) =>
+    `refusing to publish \`${tag}\` over \`${versionDir}\`: the tag points at a commit without the \`${entry.packages}/${name}\` folder, and the docs hold its Version. Its bytes are kept.`))]
 }
 
 // The Area state a Release reads before it decides anything: the Skipped tags file it takes the tag out of, in every
@@ -225,25 +222,26 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
   const candidates = readEntries(args.entries, args['source-branch']).filter(
     (entry) => entry.mode === 'release' && (entry.packages !== undefined) === Boolean(release.name),
   )
-  const folders = new Map(candidates.map((entry) => [entry, release.name
-    ? folderForTagName(readTagNames(args.source, entry), release.name) : null]))
+  const targets = new Map(candidates.map((entry) => [
+    entry, versionTargeting({ source: args.source, root, entry }).forTag(release),
+  ]))
   const releases = candidates.filter((entry) => {
     if (!release.name) return true
-    const rel = path.posix.join(entry.packages, folders.get(entry))
-    assertNoSymlinkAncestors(tagSource, rel)
-    return lstatOrNull(path.join(tagSource, rel))?.isDirectory() === true
+    const { folder } = targets.get(entry)
+    assertNoSymlinkAncestors(tagSource, folder)
+    return lstatOrNull(path.join(tagSource, folder))?.isDirectory() === true
   })
   // The Areas whose package folder the tag does not hold. Their Version folders, if the docs hold this tag's, stay as
   // they are; a moved or legacy one stops the run instead. Which Areas keep theirs is read per attempt, from the docs
   // branch that attempt fetched.
   const missing = candidates.filter((entry) => !releases.includes(entry)).map((entry) => ({
-    entry, name: folders.get(entry), dir: tagVersionDir(root, entry, folders.get(entry), release.version),
+    entry, ...targets.get(entry),
   }))
   const keptMissing = new Set()
   const reportMissing = () => {
-    for (const { entry, name, dir } of missing) {
-      writeSummary(keptMissing.has(dir)
-        ? `Already published \`${args.tag}\` in area \`${entry.area}\`: kept \`${dir}\` as it is.`
+    for (const { entry, name, versionDir } of missing) {
+      writeSummary(keptMissing.has(versionDir)
+        ? `Already published \`${args.tag}\` in area \`${entry.area}\`: kept \`${versionDir}\` as it is.`
         : `Skipped \`${args.tag}\` for area \`${entry.area}\`: no \`${entry.packages}/${name}\` folder at the tag.`)
     }
   }
@@ -255,7 +253,7 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
     const problems = releaseStateProblems({ docs: args.docs, root, entries: candidates })
     if (missing.length > 0) {
       const { kept, moved } = missingTagVersions({ docs: args.docs, root, repository, tag: args.tag, sourceRevision, missing })
-      for (const { dir } of kept) keptMissing.add(dir)
+      for (const { versionDir } of kept) keptMissing.add(versionDir)
       problems.push(...movedTagProblems(args.tag, moved))
     }
     if (problems.length > 0) throw new FatalError([...new Set(problems)].join('\n'))
@@ -283,12 +281,11 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
     return { changed: false, commitSha: null }
   }
   const areas = published.map((entry) => {
-    const name = folders.get(entry)
     const areaDir = path.posix.join(root, entry.area)
     return {
       entry,
       areaDir,
-      versionDir: tagVersionDir(root, entry, name, release.version),
+      ...targets.get(entry),
       areaFiles: readAreaFiles(args.source, areaDir, entry),
       state: null,
     }
@@ -354,8 +351,7 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
         try {
           assertNoSymlinkPath(args.docs, area.versionDir)
           const version = planVersion({
-            source: tagSource, root, entry: area.entry,
-            release: { ...release, name: folders.get(area.entry) }, repository, date, tag: args.tag, sourceRevision,
+            source: tagSource, entry: area.entry, target: area, repository, date, tag: args.tag, sourceRevision,
           })
           const fresh = snapshotAreaState(args.docs, root, area.areaDir, area.entry) === area.state
           // A newer push can publish the Area files before this attempt's first snapshot, and the snapshot then

@@ -214,7 +214,7 @@ function isSharedFileName(name) {
   return GENERATED_AREA_NAMES.has(name)
 }
 
-function isReservedName(name) {
+export function isReservedName(name) {
   return isSharedFileName(name) || name === 'latest' || SEMVER_REGEX.test(name.replace(/^v/, ''))
 }
 
@@ -394,7 +394,7 @@ export function readEntries(file, sourceBranch) {
 // The tag name release-please uses for a package folder: its `component`,
 // else its `package-name`, else the folder name. Keys under the config's
 // `packages` are `<packages>/<folder>`, or `<folder>` when `packages` is the repo root.
-// Returns null when there is no config file, so callers fall back to the folder name.
+// Returns null when there is no config file, so a tag name stands for the package folder name.
 export function readTagNames(source, entry) {
   if (!entry.tagNames) return null
   const file = entry.tagNames
@@ -449,19 +449,3 @@ function rejectDuplicateTagNames(map, prefix, file) {
   return map
 }
 
-export function folderForTagName(map, tagName) {
-  if (!map) return tagName
-  for (const [folder, tag] of map) {
-    if (tag !== tagName) continue
-    if (isReservedName(folder)) {
-      throw new FatalError(`tag component "${tagName}" resolves to "${folder}", a name the publisher reserves`)
-    }
-    return folder
-  }
-  return tagName
-}
-
-export function tagForVersionFolder(map, name, version) {
-  if (!name) return version
-  return `${map?.get(name) ?? name}-v${version}`
-}

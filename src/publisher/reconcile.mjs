@@ -1,14 +1,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import {
-  folderForTagName,
-  matchTag,
-  readEntries,
-  readTagNames,
-  tagForVersionFolder,
-  specHash,
-} from './entries.mjs'
+import { matchTag, readEntries, specHash } from './entries.mjs'
 import {
   FatalError,
   assertAreaWritable,
@@ -39,6 +32,7 @@ import {
 import { planSharedArea, snapshotAreaState, writeSharedArea } from './shared.mjs'
 import { planAreaSkips } from './skipped.mjs'
 import { planBranchVersions, planVersion } from './release.mjs'
+import { versionTargeting } from './version-folders.mjs'
 import { classifyStagedEffects, publishWithRetry, sourceBranchMoved, syncToBranch } from './push.mjs'
 import { NO_PRUNE, applyPrune, planPrune, pruneSummary, stalePruneSummary } from './prune.mjs'
 import { mirrorSummary, planMirrorWrites, prepareMirrors, writeMirrors } from './mirror.mjs'
@@ -46,25 +40,16 @@ import { docsRoot } from './root.mjs'
 
 function readReconcileArea(source, docs, root, entry, prune) {
   const areaDir = path.posix.join(root, entry.area)
-  const tagNames = readTagNames(source, entry)
+  const targeting = versionTargeting({ source, root, entry })
   const tags = git(source, ['tag', '--list']).split('\n').filter(Boolean)
   const packages = []
   for (const tag of tags) {
     const release = matchTag(tag)
     if (!release || (entry.packages !== undefined) !== Boolean(release.name)) continue
-    const name = release.name ? folderForTagName(tagNames, release.name) : null
+    const target = targeting.forTag(release)
     // A package whose folder is gone from source_branch is retired: its tags are not republished and prune deletes its docs.
-    let note = null
-    if (name && !hasTreeAt(source, 'HEAD', path.posix.join(entry.packages, name))) note = 'retired'
-    packages.push({
-      name,
-      version: release.version,
-      prerelease: release.prerelease,
-      tag,
-      versionDir: path.posix.join(areaDir, ...(name ? [name] : []), release.version),
-      files: null,
-      note,
-    })
+    const note = target.folder !== null && !hasTreeAt(source, 'HEAD', target.folder) ? 'retired' : null
+    packages.push({ ...target, prerelease: release.prerelease, tag, files: null, note })
   }
   return {
     entry,
@@ -106,13 +91,12 @@ function resolveTag(source, area, pkg) {
     pkg.note = 'missing tag'
     return
   }
-  const folder = pkg.name ? path.posix.join(area.entry.packages, pkg.name) : null
-  if (folder !== null && !hasTreeAt(source, revision, folder)) pkg.note = 'no folder'
+  if (pkg.folder !== null && !hasTreeAt(source, revision, pkg.folder)) pkg.note = 'no folder'
   else if (pkg.note === 'no folder') pkg.note = undefined
   if (!pkg.note && pkg.prerelease && !area.entry.prereleases) pkg.note = 'prerelease'
 }
 
-function readFromTag(source, root, area, pkg, repository) {
+function readFromTag(source, area, pkg, repository) {
   cleanSource(source)
   // The commit the run resolved, not the tag ref: the ref can move after the resolution, and the marker records the
   // commit the bytes came from.
@@ -120,9 +104,8 @@ function readFromTag(source, root, area, pkg, repository) {
   try {
     pkg.files = planVersion({
       source,
-      root,
       entry: area.entry,
-      release: { name: pkg.name, version: pkg.version },
+      target: pkg,
       repository,
       tag: pkg.tag,
       sourceRevision: pkg.sourceRevision,
@@ -139,13 +122,13 @@ function readFromTag(source, root, area, pkg, repository) {
 // Checking out a tag, building it and collecting its files is the expensive part of a reconcile, and the build runs
 // the tag's own code. So only the tags this run publishes are read: a Version folder the docs already hold with the
 // current specHash and tag commit costs one marker read. A retry reads only what the first attempt did not.
-function readTags(source, root, pending, repository) {
+function readTags(source, pending, repository) {
   const unread = pending.filter(({ pkg }) => !pkg.files && !pkg.note)
   if (unread.length === 0) return
   const start = gitStatus(source, ['symbolic-ref', '--quiet', '--short', 'HEAD']).stdout.trim()
     || git(source, ['rev-parse', 'HEAD'])
   try {
-    for (const { area, pkg } of unread) readFromTag(source, root, area, pkg, repository)
+    for (const { area, pkg } of unread) readFromTag(source, area, pkg, repository)
   } finally {
     cleanSource(source)
     git(source, ['checkout', '--quiet', '--force', start])
@@ -205,10 +188,10 @@ function versionsToWrite(docs, area, { source, repository, root, sourceMoved, re
   return { pending, stamps }
 }
 
-function areaHasUnmergedRelease(source, docs, area) {
-  const tags = readTagNames(source, area.entry)
+function areaHasUnmergedRelease(source, docs, root, area) {
+  const targeting = versionTargeting({ source, root, entry: area.entry })
   return existingVersionFolders(docs, area.areaDir, area.entry).some(({ name, version }) => {
-    const tag = tagForVersionFolder(tags, name, version)
+    const tag = targeting.tagFor(name, version)
     return tagExists(source, tag) && !isAncestor(source, `refs/tags/${tag}`, 'HEAD')
   })
 }
@@ -315,7 +298,7 @@ export function planReconcileWrites(docs, areas, { source, repository, root, sou
     plan.skips = planAreaSkips({ docs, areaDir: area.areaDir, entry: area.entry, repository })
     plan.skips.reuse(plan.pending)
   }
-  readTags(source, root, [...planned.values()].flatMap(({ pending }) => pending), repository)
+  readTags(source, [...planned.values()].flatMap(({ pending }) => pending), repository)
   for (const area of areas) {
     const files = new Map()
     const versions = []
@@ -373,7 +356,7 @@ export function planReconcileWrites(docs, areas, { source, repository, root, sou
     // an Area another run rewrote in between, and an Area with no Area files holds one all the same.
     if (snapshotAreaState(docs, root, area.areaDir, area.entry) !== area.state) {
       skipReason = "the Area's shared files changed since Reconcile started"
-    } else if (area.areaFiles.size > 0 && areaHasUnmergedRelease(source, docs, area)) {
+    } else if (area.areaFiles.size > 0 && areaHasUnmergedRelease(source, docs, root, area)) {
       skipReason = "a published version's tag is not an ancestor of the manual checkout"
     }
     // A checkout behind the branch tip may read an older entry than the one that published the Area files: it keeps
