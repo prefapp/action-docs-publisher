@@ -281,6 +281,66 @@ describe('a push that publishes a mirror entry', () => {
     expect(exists(readRemote(world), CORE_DOCS)).toBe(false)
   })
 
+  test('refuses a Mirror Area the Skipped tags file alone claims as a release Area, and writes nothing', () => {
+    const source = sourceWith()
+    // A checkout behind the source branch tip prunes nothing, so the claim another entry left is still there.
+    const behind = cloneSource(world, source, 'mirror-behind')
+    commitSource(source, { 'README.md': '# Source v2\n' }, 'the source branch moves on')
+    const operated = `${JSON.stringify({
+      source: 'acme/source',
+      tags: { 'demo-v0.9.0': { sourceRevision: 'b'.repeat(40), reason: 'no folder', specHash: 'c'.repeat(64) } },
+    }, null, 2)}\n`
+    seedDocs(world, { [`${CORE_DOCS}/.skipped-tags.json`]: operated, [`${CORE_DOCS}/guide.md`]: '# Guide\n' })
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world), { source: behind, reconcile: true })
+
+    expect(run.status).toBe(2)
+    expect(run.output).toContain(
+      'refusing to publish site/raw/core/docs: the docs mark it as a release Area, and a Mirror Area cannot sit inside a release Area. Choose another Area.',
+    )
+    expect(remoteCommitCount(world)).toBe(before)
+    const landed = readRemote(world)
+    expect(readFile(landed, `${CORE_DOCS}/.skipped-tags.json`)).toBe(operated)
+    expect(readFile(landed, `${CORE_DOCS}/guide.md`)).toBe('# Guide\n')
+  })
+
+  test('refuses a Mirror Area that holds a release Area the Skipped tags file alone claims, and writes nothing', () => {
+    const source = sourceWith()
+    const nested = 'site/raw/core/docs/old'
+    const reloaded = `${JSON.stringify({
+      source: 'other/repo',
+      tags: { 'demo-v0.9.0': { sourceRevision: 'b'.repeat(40), reason: 'prerelease' } },
+    }, null, 2)}\n`
+    seedDocs(world, { [`${nested}/.skipped-tags.json`]: reloaded })
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world), { source })
+
+    expect(run.status).toBe(2)
+    expect(run.output).toContain(
+      `refusing to publish ${CORE_DOCS}: it holds the release Area ${nested}, and a Mirror Area cannot sit inside a release Area. Choose another Area.`,
+    )
+    expect(remoteCommitCount(world)).toBe(before)
+    expect(readFile(readRemote(world), `${nested}/.skipped-tags.json`)).toBe(reloaded)
+  })
+
+  test('refuses a Mirror Area that holds a damaged Skipped tags file, and writes nothing', () => {
+    const source = sourceWith()
+    const damaged = 'site/raw/core/docs/old'
+    seedDocs(world, { [`${damaged}/.skipped-tags.json`]: '{', [`${damaged}/notes.md`]: '# Notes\n' })
+    const before = remoteCommitCount(world)
+
+    const run = runPublisher(cloneDocs(world), { source })
+
+    expect(run.status).toBe(2)
+    expect(run.output).toContain(`refusing to publish ${CORE_DOCS}: invalid .skipped-tags.json: ${damaged}/.skipped-tags.json`)
+    expect(remoteCommitCount(world)).toBe(before)
+    const landed = readRemote(world)
+    expect(readFile(landed, `${damaged}/.skipped-tags.json`)).toBe('{')
+    expect(readFile(landed, `${damaged}/notes.md`)).toBe('# Notes\n')
+  })
+
   test.each([false, true])('makes no commit for identical content (manual: %s)', (reconcile) => {
     const source = sourceWith()
     expect(runPublisher(cloneDocs(world, 'first'), { source }).status).toBe(0)

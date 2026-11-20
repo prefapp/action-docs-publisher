@@ -155,6 +155,26 @@ export function planMirrorWrites({ args, repository, mirrors, releaseFiles = new
         `refusing to publish ${area.areaDir}: it sits inside the release Area ${releaseArea}, and a Mirror Area cannot sit inside a release Area. Choose another Area.`,
       )
     }
+    // A Skipped tags file claims its folder as a release Area without any Version folder, and a mirror replaces its
+    // Area whole: one that is that Area, or that holds it, would clear the file and the Area's own files too. The
+    // claims are read after Prune, so an Area a retired entry just freed is not one of them.
+    const claimedArea = releaseAreas.find((dir) => dir === area.areaDir)
+    if (claimedArea !== undefined) {
+      throw new FatalError(
+        `refusing to publish ${area.areaDir}: the docs mark it as a release Area, and a Mirror Area cannot sit inside a release Area. Choose another Area.`,
+      )
+    }
+    const heldArea = releaseAreas.find((dir) => dir.startsWith(`${area.areaDir}/`))
+    if (heldArea !== undefined) {
+      throw new FatalError(
+        `refusing to publish ${area.areaDir}: it holds the release Area ${heldArea}, and a Mirror Area cannot sit inside a release Area. Choose another Area.`,
+      )
+    }
+    // A damaged record inside the tree the mirror clears is refused here: the clear would delete the only copy of
+    // what the record says about the Area it marks.
+    const damaged = scanned.invalid.find((entry) =>
+      entry.dir === area.areaDir || entry.dir.startsWith(`${area.areaDir}/`))
+    if (damaged !== undefined) throw new FatalError(`refusing to publish ${area.areaDir}: ${damaged.message}`)
     // A mirror replaces its Area as a whole, so a folder with no marker anywhere in it is refused rather than cleared.
     // A plan placeholder names the paths its collect rules would write, so plan and run refuse the same folders; a plan
     // that could not expand the rules (`destinations: null`) leaves the question to the run instead of guessing.
