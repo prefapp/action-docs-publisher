@@ -3,6 +3,7 @@ import path from 'node:path'
 import { SEMVER_REGEX } from './entries.mjs'
 import { FatalError, SKIPPED_TAGS_FILE, assertAreaWritable, assertRecordOwners, assertNoSymlinkPath, existingVersionFolders, folderNames, markerRecordAt, markerRecords, lstatOrNull, metaFile, put, readMarkerRecord, writeFile, writeSummary } from './files.mjs'
 import { scan } from './prune.mjs'
+import { skippedRecordAt } from './skipped.mjs'
 import { docsRoot } from './root.mjs'
 
 // Ported from the former shared-file rebuilder. Build identifiers do not affect precedence.
@@ -100,12 +101,19 @@ export function placementProblems(docs, root, areaDir, versions) {
       return null
     }
   }
-  const records = scan(docs, root).records
+  const scanned = scan(docs, root)
+  const records = scanned.records
   const scope = docsRoot(root)
+  // A Skipped tags file claims the folder it sits in as an Area, so a release Area may not sit inside one: the file
+  // is the only proof that another Area already published there.
+  const skippedAreas = new Set(scanned.skipped.map((record) => record.areaDir))
   const labels = { Version: 'Version folder', Branch: 'Branch Version folder', Mirror: 'mirror Area' }
   for (let dir = areaDir; scope.contains(dir); dir = path.posix.dirname(dir)) {
     const record = read(dir)
     if (record) problems.push(`refusing to publish ${areaDir}: it sits inside a ${labels[record.kind]} at ${dir}`)
+    if (dir !== areaDir && skippedAreas.has(dir)) {
+      problems.push(`refusing to publish ${areaDir}: it sits inside a release Area at ${dir}`)
+    }
     if (dir !== areaDir && records.some((record) => record.areaDir === dir && record.dir !== dir)) {
       problems.push(`refusing to publish ${areaDir}: it sits inside a release Area at ${dir}`)
     }
@@ -116,7 +124,7 @@ export function placementProblems(docs, root, areaDir, versions) {
   }
   // A Mirror Area never sits inside a release Area. The scan skips a Version folder's inside, which `versionFiles`
   // covers: a marker there is refused with the same message.
-  for (const mirror of scan(docs, root).mirrors) {
+  for (const mirror of scanned.mirrors) {
     if (mirror.dir.startsWith(`${areaDir}/`)) problems.push(mirrorAreaProblem(areaDir, mirror.dir))
   }
   return problems
@@ -131,10 +139,17 @@ export function planSharedArea({ docs, root, entry, repository, branch, docsRepo
   }
   const problems = []
   const records = markerRecords(docs, root, areaDir, (_dir, error) => problems.push(error.message))
+  // The Skipped tags file at the top of the Area claims it for the repo it names, with or without a Version folder.
+  // `placementProblems` has already found a damaged one; this read names the same folder's owner, or the damage.
+  let own = null
+  try { own = skippedRecordAt(docs, areaDir) } catch (error) {
+    if (!(error instanceof FatalError)) throw error
+    problems.push(error.message)
+  }
   // The Branch Version folders the marker reader validated: each holds content, not a version of this list, and prune
   // decides when it retires. A folder it does not name is no Branch Version folder, whatever it is called.
   const branchDirs = new Set(records.filter((record) => record.kind === 'Branch').map((record) => record.dir))
-  try { assertRecordOwners(records, [areaDir], root, repository) } catch (error) {
+  try { assertRecordOwners([...records, ...(own ? [own] : [])], [areaDir], root, repository) } catch (error) {
     if (!(error instanceof FatalError)) throw error
     problems.push(error.message)
   }

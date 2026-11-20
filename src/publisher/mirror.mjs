@@ -38,6 +38,16 @@ import { classifyStagedEffects, publishWithRetry, sourceBranchMoved, syncToBranc
 import { planBranchVersions, rebuildPackages } from './release.mjs'
 import { scan } from './prune.mjs'
 import { placementProblems, planSharedArea, snapshotAreaState, writeSharedArea } from './shared.mjs'
+import { skippedRecordAt } from './skipped.mjs'
+
+// A Mirror Area is owned by every marker its folder holds, and a Skipped tags file claims the folder as an Area just
+// as a `.meta.json` does: one that names another repo is refused before the mirror clears the folder.
+function assertAreaOwner(docs, root, dir, area, repository) {
+  const marker = markerRecordAt(docs, root, dir)
+  assertMarkerOwner(marker, area, repository)
+  assertMarkerOwner(skippedRecordAt(docs, dir), area, repository)
+  return marker
+}
 
 export function pushChangedFiles(source, before, after) {
   if (!before || !isAncestor(source, before, after)) return null
@@ -101,7 +111,7 @@ export function planMirrorWrites({ args, repository, mirrors, releaseFiles = new
   const docs = args.docs
   // A mirror publishes what the checkout holds, whatever revision the Area was last published from.
   const writable = mirrors
-  for (const area of writable) assertMarkerOwner(markerRecordAt(docs, args.root, area.areaDir), area.area, repository)
+  for (const area of writable) assertAreaOwner(docs, args.root, area.areaDir, area.area, repository)
   const plannedFiles = new Map(releaseFiles)
   for (const area of writable) {
     for (const [rel, file] of area.files) put(plannedFiles, rel, file)
@@ -113,7 +123,12 @@ export function planMirrorWrites({ args, repository, mirrors, releaseFiles = new
   // Branch Version folder is the same evidence when the Area holds no Version folder yet, and its marker names the
   // Area, so the layout never has to be guessed.
   const scanned = scan(docs, args.root)
-  const releaseAreas = [...new Set(scanned.records.filter((record) => record.dir !== record.areaDir).map((record) => record.areaDir))]
+  // A Version or Branch Version folder proves its Area, and so does a Skipped tags file, so a Mirror Area that is one
+  // of those Areas, or sits inside one, stops here.
+  const releaseAreas = [...new Set([
+    ...scanned.records.filter((record) => record.dir !== record.areaDir).map((record) => record.areaDir),
+    ...scanned.skipped.map((record) => record.areaDir),
+  ])]
   for (const area of writable) {
     const plannedVersion = [...releaseFiles].find(([rel, file]) =>
       rel.startsWith(`${area.areaDir}/`) && rel.endsWith('/.meta.json') && readMarkerRecord(file.content, rel, args.root).kind === 'Version',
@@ -172,8 +187,7 @@ export function prepareMirrors({ args, repository, root }) {
   const sourceRevision = git(args.source, ['rev-parse', 'HEAD'])
   const isPush = args.before !== undefined || args.after !== undefined
   const matched = mirrors.filter((entry) => {
-    const previous = markerRecordAt(args.docs, root, path.posix.join(root, entry.area))
-    assertMarkerOwner(previous, entry.area, repository)
+    const previous = assertAreaOwner(args.docs, root, path.posix.join(root, entry.area), entry.area, repository)
     const touched = isPush && previous?.sourceBranch === args['source-branch']
       ? pushChangedFiles(args.source, previous.sourceRevision, sourceRevision) : null
     return touched === null || entriesChanged(args.source, args.entries, touched) || matchesPush(entry, touched)

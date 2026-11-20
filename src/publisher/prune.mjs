@@ -10,11 +10,13 @@ import {
   groupBy,
   hasTreeAt,
   lstatOrNull,
+  namesGitPath,
   assertRecordOwners,
   markerRecords,
   tagExists,
   writeSummary,
 } from './files.mjs'
+import { skippedRecordAt, skippedTagsPath } from './skipped.mjs'
 import { docsRoot } from './root.mjs'
 
 // Prune makes the docs repo match the desired state: an Area whose entry is gone, or a package whose
@@ -42,17 +44,43 @@ function prunedView(removals, { plannedDirs, mirrorAreas }) {
   }
 }
 
-// Finds every Mirror Area, Branch Version folder and Version folder under the root. It does not enter a Version
-// folder, but it does enter a Mirror Area, because another Area (maybe ours) can be nested inside.
+// Every folder below the root that holds a Skipped tags file claims an Area there, whatever else it holds: a folder
+// with a Version or Branch Version marker beside the file is a claim too, and so is a hand-made folder at that path.
+// A damaged file is listed with the damaged markers, so Prune defers the ones it does not touch and stops on an Area
+// it would clear.
+function skippedRecords(docs, root, invalid) {
+  const records = []
+  const walk = (dir) => {
+    try {
+      const record = skippedRecordAt(docs, dir)
+      if (record) records.push(record)
+    } catch (error) {
+      if (!(error instanceof FatalError)) throw error
+      invalid.push({ dir, rel: skippedTagsPath(dir), message: error.message })
+    }
+    for (const name of folderNames(path.join(docs, dir))) {
+      if (!namesGitPath(name)) walk(path.posix.join(dir, name))
+    }
+  }
+  for (const name of folderNames(path.join(docs, root))) {
+    if (!namesGitPath(name)) walk(path.posix.join(root, name))
+  }
+  return records
+}
+
+// Finds every Mirror Area, Branch Version folder, Version folder and Skipped tags Area under the root. It does not
+// enter a Version folder, but it does enter a Mirror Area, because another Area (maybe ours) can be nested inside.
 export function scan(docs, root) {
   const invalid = []
-  const records = markerRecords(docs, root, root, (dir, error) => {
+  const markers = markerRecords(docs, root, root, (dir, error) => {
     // An untouched version-shaped folder stays for the Area's write guards: a plain push contains a broken Area.
     if (error.outsideRoot || !SEMVER_REGEX.test(path.posix.basename(dir).replace(/^v/, ''))) throw error
     invalid.push({ dir, message: error.message })
   })
+  const skipped = skippedRecords(docs, root, invalid)
+  const records = [...markers, ...skipped]
   return {
-    records, invalid,
+    skipped, records, invalid,
     mirrors: records.filter((record) => record.kind === 'Mirror'),
     branches: records.filter((record) => record.kind === 'Branch'),
     versions: records.filter((record) => record.kind === 'Version'),
@@ -85,7 +113,7 @@ function missingVersionChildren(docs, dir, plannedDirs) {
 }
 
 export function planPrune({ docs, source, root, repository, entries }) {
-  const { records, invalid, mirrors, branches, versions } = scan(docs, root)
+  const { records, invalid, mirrors, branches, versions, skipped } = scan(docs, root)
   const ownedDirs = new Set(records.filter((record) => record.source === repository).map((record) => record.dir))
   const mirrorAreas = new Map(entries.filter((entry) => entry.mode === 'mirror').map((entry) => [path.posix.join(root, entry.area), entry]))
   const releaseAreas = new Map(entries.filter((entry) => entry.mode === 'release').map((entry) => [path.posix.join(root, entry.area), entry]))
@@ -169,6 +197,16 @@ export function planPrune({ docs, source, root, repository, entries }) {
       removals.push({ dir: branch.dir, areaDir, kind: 'package-gone', reason: `\`${entry.packages}/${name}\` is gone from the source repo` })
     }
   }
+  // A Release Area the Skipped tags file alone claims has no Version or Branch Version folder to retire it: the file
+  // names the repo that owns the Area, so a retired Area goes with it, its top-level Area files included. A folder
+  // beside the file is not the file's to delete, so it stays and the Area is left for a run that knows what it is.
+  for (const record of skipped) {
+    const { areaDir } = record
+    if (releaseAreas.has(areaDir) || retiredAreas.has(areaDir) || !ownedDirs.has(areaDir)) continue
+    if (removals.some((removal) => removal.dir === areaDir)) continue
+    if (folderNames(path.join(docs, areaDir)).length > 0) continue
+    removals.push({ dir: areaDir, areaDir, ...areaRemoval(areaDir, 'release') })
+  }
   const plannedDirs = new Set([...removals.map((removal) => removal.dir), ...removedVersions])
   const isPruned = prunedView(removals, { plannedDirs, mirrorAreas: mirrors.map((mirror) => mirror.areaDir) })
   const affectedAreas = [
@@ -176,8 +214,12 @@ export function planPrune({ docs, source, root, repository, entries }) {
     ...records.filter((record) => isPruned(record.areaDir)).map((record) => record.areaDir),
   ]
   assertRecordOwners(records, affectedAreas, root, repository)
+  // A damaged marker stops the run when the plan clears its folder. A damaged Skipped tags file stops it when the plan
+  // removes the file, whether it clears the Area or deletes the file with the Area's other top-level files.
+  const removed = (damaged) => isPruned(damaged.dir) ||
+    (damaged.rel !== undefined && files.some((file) => file.rel === damaged.rel))
   for (const damaged of invalid) {
-    if (isPruned(damaged.dir)) problems.push(damaged.message)
+    if (removed(damaged)) problems.push(damaged.message)
   }
   for (const { dir } of removals) problems.push(...missingVersionChildren(docs, dir, plannedDirs))
   if (problems.length > 0) throw new FatalError([...new Set(problems)].join('\n'))

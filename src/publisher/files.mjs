@@ -566,15 +566,16 @@ export function areaFileProblemsSummary(areaDir, problem) {
   writeSummary(`Kept the Area files of \`${areaDir}\`: ${problem}; run a manual run to repair it.`)
 }
 
-// True when a folder holds a `.meta.json` anywhere below it: an Area, a Version folder or a nested Area. It is the
-// evidence that a source repo published there, whatever the marker says.
+// True when a folder holds a `.meta.json`, or a Skipped tags file, anywhere below it: an Area, a Version folder, a
+// nested Area, or a Release Area the Skipped tags file alone claims. It is the evidence that a source repo published
+// there, whatever the record says.
 function holdsMarker(docs, dir) {
   const walk = (rel) => {
     for (const name of fs.readdirSync(path.join(docs, rel)).sort()) {
       if (name === GIT_DIR) continue
       const child = `${rel}/${name}`
       const stat = lstatOrNull(path.join(docs, child))
-      if (name === '.meta.json') return true
+      if (name === '.meta.json' || name === SKIPPED_TAGS_FILE) return true
       if (stat?.isDirectory() && walk(child)) return true
     }
     return false

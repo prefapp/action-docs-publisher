@@ -15,10 +15,9 @@ export function skippedTagsPath(areaDir) {
   return path.posix.join(areaDir, SKIPPED_TAGS_FILE)
 }
 
-// The tags the Area's Skipped tags file records, or null when it has none. The file is validated whole before any
-// entry is used: a damaged file stops the run instead of reading as an Area with no skips, which would re-check and
-// rewrite every tag it names.
-export function readSkippedTags(docs, areaDir) {
+// The Area's Skipped tags file, validated whole, or null when it has none. A damaged file stops the run instead of
+// reading as an Area with no skips, which would re-check and rewrite every tag it names.
+function readSkippedTagsFile(docs, areaDir) {
   const rel = skippedTagsPath(areaDir)
   const invalid = () => {
     throw new FatalError(`invalid ${SKIPPED_TAGS_FILE}: ${rel}`)
@@ -44,7 +43,20 @@ export function readSkippedTags(docs, areaDir) {
     if (record.detail !== undefined && (typeof record.detail !== 'string' || record.detail === '')) invalid()
     records.set(tag, record)
   }
-  return records
+  return { source: data.source, tags: records }
+}
+
+// The tags the Skipped tags file records, or null when the Area has none.
+export function readSkippedTags(docs, areaDir) {
+  return readSkippedTagsFile(docs, areaDir)?.tags ?? null
+}
+
+// The record the Skipped tags file makes of the folder it sits in: it names the repo that owns the Area, the way a
+// `.meta.json` record does, so ownership, placement and Prune read it with the same rules. A Release Area holding one
+// and no Version folder is still an Area another repo may not publish into, and Prune may delete.
+export function skippedRecordAt(docs, areaDir) {
+  const file = readSkippedTagsFile(docs, areaDir)
+  return file === null ? null : { kind: 'Skipped', source: file.source, dir: areaDir, areaDir }
 }
 
 // The file's bytes: the owner, then one entry per tag in a fixed order, so a run that changes nothing rewrites the
