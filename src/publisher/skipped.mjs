@@ -1,7 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { specHash } from './entries.mjs'
-import { FatalError, SKIPPED_TAGS_FILE, lstatOrNull, metaFile, tagExists, tagRevision } from './files.mjs'
+import { FatalError, lstatOrNull, metaFile } from './files.mjs'
+import { SKIPPED_TAGS_FILE } from './area-names.mjs'
 
 // The reasons a tag is skipped, and the ones whose skip depends on the entry's spec: a changed `collect`, `build` or
 // `packages` can make the tag fit again, so only the hash recorded with the skip can tell.
@@ -66,17 +67,16 @@ export function skippedTagsFile({ source, tags }) {
   return metaFile({ source, tags: Object.fromEntries(sorted) })
 }
 
-// The tags this run skipped, with the state it skipped them under. A tag reported as skipped but already published,
-// and a tag that names nothing git holds, are no skips: only what this run genuinely passed over is written.
-export function skippedTagsToRecord({ packages, report, entry, source }) {
+// The tags this run skipped, with the state it skipped them under. A tag whose Version folder the docs already hold
+// is recorded too: its bytes stay where they are, and a later run reuses the skip instead of rebuilding the tag to
+// find out it still does not fit. A Release publishing the tag clears the record again. A tag that names nothing git
+// holds is no skip: only what this run genuinely passed over is written.
+export function skippedTagsToRecord({ packages, report, entry }) {
   const tags = new Map()
   for (const pkg of report.skipped) {
-    if (!packages.includes(pkg) || pkg.published || !pkg.note) continue
-    if (pkg.note === 'missing tag') continue
-    // A retired package's tags are never resolved, so the commit each one names is read here, only to record it.
-    const sourceRevision = pkg.sourceRevision ?? (tagExists(source, pkg.tag) ? tagRevision(source, pkg.tag) : undefined)
-    if (sourceRevision === undefined) continue
-    const record = { sourceRevision, reason: pkg.note }
+    if (!packages.includes(pkg) || !pkg.note) continue
+    if (pkg.note === 'missing tag' || pkg.sourceRevision === undefined) continue
+    const record = { sourceRevision: pkg.sourceRevision, reason: pkg.note }
     if (SPEC_SENSITIVE_REASONS.has(pkg.note)) record.specHash = specHash(entry)
     if (pkg.note === 'content' && pkg.reason !== undefined) record.detail = pkg.reason
     tags.set(pkg.tag, record)
@@ -86,28 +86,23 @@ export function skippedTagsToRecord({ packages, report, entry, source }) {
 
 // Skips a recorded entry still covers: the tag is not checked out and its build never runs again. The record only
 // ever agrees with what this run re-derived without a checkout, and only a `content` skip stands in for a build, so
-// a moved tag, a changed spec, a package folder that came back or a prerelease now published is re-evaluated.
+// a moved tag, a changed spec, a package folder that came back or a prerelease now published is re-evaluated. A tag
+// whose Version folder the docs hold is no exception: the record speaks for the tag, and the run keeps the bytes.
 export function reuseSkippedTags({ records, pending, entry, areaDir, report }) {
   if (!records) return
-  for (const { pkg, existing } of pending) {
-    // A tag whose Version folder the docs hold is published: no skip record speaks for it.
-    if (existing) continue
+  for (const { pkg } of pending) {
     const record = records.get(pkg.tag)
     if (!record) continue
-    // The recorded commit has to agree with the one the run read. A retired package's tags are never resolved, and
-    // its reason comes from the package folder alone, so there is nothing else to compare there.
-    if (pkg.sourceRevision !== undefined && record.sourceRevision !== pkg.sourceRevision) continue
+    // The recorded commit has to agree with the one the run read, retired packages included: a tag moved onto another
+    // commit is another tag state, and its skip may not hold anymore.
+    if (record.sourceRevision !== pkg.sourceRevision) continue
     // The record only covers a skip this run re-derived: a `content` record is the one reason it may stand in for,
     // because that is the only reason a run cannot reach without a checkout and a build.
     if (record.reason !== (pkg.note ?? 'content')) continue
     // A spec-sensitive skip is the same skip only while the entry still hashes the same.
     if (SPEC_SENSITIVE_REASONS.has(record.reason) && record.specHash !== specHash(entry)) continue
-    if (record.reason === 'content') {
-      // The summary repeats the recorded reason, so a record without one is not a skip this run can report.
-      if (record.detail === undefined) continue
-      if (!pkg.note) pkg.reason = record.detail
-      pkg.note = record.reason
-    }
+    if (record.reason === 'content' && !pkg.note && record.detail !== undefined) pkg.reason = record.detail
+    pkg.note = record.reason
     report.previouslySkipped.push({ areaDir, tag: pkg.tag, reason: pkg.note })
   }
 }

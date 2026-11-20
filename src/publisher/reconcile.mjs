@@ -29,8 +29,8 @@ import {
   metaFile,
   put,
   tagDate,
+  tagCommit,
   tagExists,
-  tagRevision,
   TagContentError,
   markerRecordAt,
   writeFile,
@@ -61,11 +61,7 @@ function readReconcileArea(source, docs, root, entry, prune) {
     const name = release.name ? folderForTagName(tagNames, release.name) : null
     // A package whose folder is gone from source_branch is retired: its tags are not republished and prune deletes its docs.
     let note = null
-    if (name) {
-      const folder = path.posix.join(entry.packages, name)
-      if (!hasTreeAt(source, 'HEAD', folder)) note = 'retired'
-      else if (!hasTreeAt(source, `refs/tags/${tag}`, folder)) note = 'no folder'
-    }
+    if (name && !hasTreeAt(source, 'HEAD', path.posix.join(entry.packages, name))) note = 'retired'
     packages.push({
       name,
       version: release.version,
@@ -90,23 +86,43 @@ function cleanSource(source) {
   git(source, ['clean', '-fdqx'])
 }
 
-// The tags a reconcile can never publish are named without a checkout, and every tag it can publish carries the commit
-// it points at, which decides whether an already published Version folder is stale.
+// The tags a reconcile can never publish are named without a checkout, and every tag it can publish carries the
+// commit it points at, which decides whether an already published Version folder is stale. The commit is read again
+// after each attempt's fetch: the tag ref is mutable, and a retry that fetches can find it on another commit.
 function resolveTag(source, area, pkg) {
-  // A retired package's folders are pruned whatever its tags say, so its tags are never read: the commit each one
-  // names is recorded with the skip, but nothing needs it here.
-  if (pkg.note === 'retired') return
-  if (!tagExists(source, pkg.tag)) {
-    pkg.note ??= 'missing tag'
+  const revision = tagCommit(source, pkg.tag)
+  // A retired package's folders are pruned whatever its tags say, so its tags are never checked out: the commit each
+  // one names is recorded with the skip, and nothing else about it is needed. It is still read, because a tag moved
+  // onto another commit is another tag state, and the recorded skip may not hold for it.
+  if (pkg.note === 'retired') {
+    pkg.sourceRevision = revision ?? undefined
     return
   }
-  pkg.sourceRevision = tagRevision(source, pkg.tag)
+  // The commit this run planned or built for the tag is the one its cached build output belongs to. A tag that now
+  // names another commit, or no tag at all, has nothing the earlier read still covers.
+  if (revision !== pkg.sourceRevision) {
+    if (pkg.sourceRevision !== undefined) {
+      pkg.files = null
+      pkg.reason = undefined
+      if (pkg.note === 'content') pkg.note = undefined
+    }
+    pkg.sourceRevision = revision ?? undefined
+  }
+  if (revision === null) {
+    pkg.note = 'missing tag'
+    return
+  }
+  const folder = pkg.name ? path.posix.join(area.entry.packages, pkg.name) : null
+  if (folder !== null && !hasTreeAt(source, revision, folder)) pkg.note = 'no folder'
+  else if (pkg.note === 'no folder') pkg.note = undefined
   if (!pkg.note && pkg.prerelease && !area.entry.prereleases) pkg.note = 'prerelease'
 }
 
 function readFromTag(source, root, area, pkg, repository) {
   cleanSource(source)
-  git(source, ['checkout', '--quiet', '--detach', `refs/tags/${pkg.tag}`])
+  // The commit the run resolved, not the tag ref: the ref can move after the resolution, and the marker records the
+  // commit the bytes came from.
+  git(source, ['checkout', '--quiet', '--detach', pkg.sourceRevision])
   try {
     pkg.files = planVersion({
       source,
@@ -138,7 +154,7 @@ function readTags(source, root, pending, repository) {
     for (const { area, pkg } of unread) readFromTag(source, root, area, pkg, repository)
   } finally {
     cleanSource(source)
-    git(source, ['checkout', '--quiet', '--force', start, '--'])
+    git(source, ['checkout', '--quiet', '--force', start])
   }
 }
 
@@ -181,7 +197,10 @@ function versionsToWrite(docs, area, { source, repository, root, sourceMoved, re
       // A run whose checkout is behind the source branch tip reads an older entry and an older tag than the ones
       // that published this Version, so it cannot tell which is newer: it keeps the bytes the docs already hold.
       if (sourceMoved) {
-        report.specStale.push(pkg.versionDir)
+        // Which of the two the checkout got wrong decides how the skip is worded: an older entry is an older spec,
+        // and a tag read before its fetch moved is an older build of the same spec.
+        if (specChanged) report.versionStale.push(pkg.versionDir)
+        else report.buildStale.push(pkg.versionDir)
         continue
       }
       // A spec change keeps its own line in the summary and the plan; a tag that moved is the other reason.
@@ -236,14 +255,18 @@ function previouslySkippedLine(previouslySkipped) {
 // `previouslySkipped` are the tags this run reused instead of re-deriving: one count line stands in for their names,
 // and `collapse` puts the tags it did re-derive inside a `<details>` block when there are more than ten of them.
 export function skippedReconcileLines({
-  sourceBranch, areaFilesSkipped, skipped, previouslySkipped = [], specStale = [], branchStale = [], collapse = false,
+  sourceBranch, areaFilesSkipped, skipped, previouslySkipped = [], versionStale = [], buildStale = [], branchStale = [], collapse = false,
 }) {
-  // A tag this run reused stays out of the per-tag lines, whatever reason the record it read gives.
-  const reused = new Set(previouslySkipped.map(({ tag }) => tag))
-  const fresh = skipped.filter((pkg) => !reused.has(pkg.tag))
+  // A tag this run reused stays out of the per-tag lines, whatever reason the record it read gives. A reuse belongs
+  // to one Area: the same tag skipped fresh in another Area is that Area's own skip, and it is named here.
+  const reused = new Set(previouslySkipped.map(({ areaDir, tag }) => `${areaDir ?? ''}\u0000${tag}`))
+  const fresh = skipped.filter((pkg) => !reused.has(`${pkg.areaDir ?? ''}\u0000${pkg.tag}`))
   const lines = areaFilesSkipped.map(({ dir, reason }) => `- Skipped Area files for \`${dir}\`: ${reason}.`)
-  if (specStale.length > 0) {
-    lines.push(`- Skipped ${list(specStale)}: the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell whether a newer spec is already published.`)
+  if (versionStale.length > 0) {
+    lines.push(`- Skipped ${list(versionStale)}: the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell whether a newer spec is already published.`)
+  }
+  if (buildStale.length > 0) {
+    lines.push(`- Skipped ${list(buildStale)}: the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell whether a newer build of the tag is already published.`)
   }
   if (branchStale.length > 0) {
     lines.push(`- Skipped ${list(branchStale)}: the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell whether a newer build is already published.`)
@@ -275,24 +298,25 @@ export function skippedReconcileLines({
   return lines
 }
 
-// `skippedTags` says what the run does with each Area's Skipped tags file: `'read'` (a Plan) reuses the skips the
-// file records and writes nothing, `'write'` (a Reconcile) reuses them and writes the file again, and `false`
-// ignores the file and so re-checks every tag.
-export function planReconcileWrites(docs, areas, { source, repository, root, sourceBranch, sourceMoved = false, skippedTags = false }) {
-  const report = { published: [], republished: [], moved: [], branches: [], kept: [], stamped: [], untagged: [], skipped: [], previouslySkipped: [], areaFilesSkipped: [], specStale: [], branchStale: [] }
+// Every run reuses the skips each Area's Skipped tags file records, and `writeSkippedTags` says whether it writes the
+// file again (a Reconcile) or leaves the docs copy as it is (a Plan).
+export function planReconcileWrites(docs, areas, { source, repository, root, sourceBranch, sourceMoved = false, writeSkippedTags = false }) {
+  const report = { published: [], republished: [], moved: [], branches: [], kept: [], stamped: [], untagged: [], skipped: [], previouslySkipped: [], areaFilesSkipped: [], versionStale: [], buildStale: [], branchStale: [] }
   const writes = new Map()
   const written = []
   const removals = []
+  // The attempt's fetch is behind this plan: a tag the run planned or built before it may have moved, so each tag's
+  // commit is read again and a build cached for the older commit is dropped.
+  for (const area of areas) {
+    for (const pkg of area.packages) resolveTag(source, area, pkg)
+  }
   const revision = areas.some((area) => area.entry.publishSourceBranch === true) ? git(source, ['rev-parse', 'HEAD']) : null
   const planned = new Map(areas.map((area) => [area, versionsToWrite(docs, area, { source, repository, root, sourceMoved, report })]))
-  const skipped = skippedTags ? new Map(areas.map((area) => [area.areaDir, readSkippedTags(docs, area.areaDir)])) : null
-  if (skipped) {
-    for (const area of areas) {
-      reuseSkippedTags({
-        records: skipped.get(area.areaDir), pending: planned.get(area).pending,
-        entry: area.entry, areaDir: area.areaDir, report,
-      })
-    }
+  for (const area of areas) {
+    reuseSkippedTags({
+      records: readSkippedTags(docs, area.areaDir), pending: planned.get(area).pending,
+      entry: area.entry, areaDir: area.areaDir, report,
+    })
   }
   readTags(source, root, [...planned.values()].flatMap(({ pending }) => pending), repository)
   for (const area of areas) {
@@ -304,10 +328,11 @@ export function planReconcileWrites(docs, areas, { source, repository, root, sou
     // files stay exactly as they are.
     for (const { rel, file } of stamps) put(files, rel, file)
     for (const { pkg, existing } of pending) {
+      // Which Area the skip belongs to: the same tag can be skipped in two Areas, and a summary names each one.
+      pkg.areaDir = area.areaDir
       if (!pkg.files) {
-        // A tag whose Version folder the docs already hold is published, whatever this run says about it: its skip
-        // is never recorded, since the next Release for the tag would have to clear it again.
-        if (existing) pkg.published = true
+        // A tag whose Version folder the docs already hold keeps its bytes: only a run that can rebuild it replaces
+        // them. Its skip is recorded like any other, so the next run reuses it instead of building the tag again.
         report.skipped.push(pkg)
         continue
       }
@@ -349,12 +374,12 @@ export function planReconcileWrites(docs, areas, { source, repository, root, sou
       }
     }
     let skipReason
-    if (area.areaFiles.size > 0) {
-      if (snapshotAreaState(docs, root, area.areaDir, area.entry) !== area.state) {
-        skipReason = "the Area's shared files changed since Reconcile started"
-      } else if (areaHasUnmergedRelease(source, docs, area)) {
-        skipReason = "a published version's tag is not an ancestor of the manual checkout"
-      }
+    // The Area's own state is compared whatever its entry names: a retry must not overwrite the Skipped tags file of
+    // an Area another run rewrote in between, and an Area with no Area files holds one all the same.
+    if (snapshotAreaState(docs, root, area.areaDir, area.entry) !== area.state) {
+      skipReason = "the Area's shared files changed since Reconcile started"
+    } else if (area.areaFiles.size > 0 && areaHasUnmergedRelease(source, docs, area)) {
+      skipReason = "a published version's tag is not an ancestor of the manual checkout"
     }
     // A checkout behind the branch tip may read an older entry than the one that published the Area files: it keeps
     // the docs ones, whether or not its own entry names any.
@@ -370,9 +395,9 @@ export function planReconcileWrites(docs, areas, { source, repository, root, sou
     // The Skipped tags file this run leaves: the tags it skipped and the state it skipped them under, so a later run
     // need not check them again. A run that cannot publish the Area's files (a moved source branch, a race) leaves
     // the docs copy as it is, and an Area with no skips left loses the file.
-    if (skippedTags === 'write' && !skipReason) {
+    if (writeSkippedTags && !skipReason) {
       const rel = skippedTagsPath(area.areaDir)
-      const tags = skippedTagsToRecord({ packages: area.packages, report, entry: area.entry, source })
+      const tags = skippedTagsToRecord({ packages: area.packages, report, entry: area.entry })
       if (tags.size > 0) put(files, rel, skippedTagsFile({ source: repository, tags }))
       else if (lstatOrNull(path.join(docs, rel))) removals.push(rel)
     }
@@ -429,7 +454,9 @@ export function prepareReconcile({ args, repository, root, prune }) {
     return []
   }
 
-  const fetch = gitRemote(args.source, ['fetch', '--quiet', '--force', '--tags', 'origin'])
+  // `--prune-tags` makes origin the only list: a tag deleted there is gone from this clone too, and this run does not
+  // republish from a ref the remote no longer has.
+  const fetch = gitRemote(args.source, ['fetch', '--quiet', '--force', '--tags', '--prune', '--prune-tags', 'origin'])
   if (fetch.status !== 0) throw new FatalError(`git fetch failed: ${fetch.stderr.trim()}`)
   const areas = entries.map((entry) => readReconcileArea(args.source, args.docs, root, entry, prune))
   rejectMergedVersionFolders(areas)
@@ -480,7 +507,7 @@ export function publishReconcile({ args, repository, root }) {
       // stops here, before the prune deletes anything and before it writes into any Area.
       const pruned = applyPrune(args.docs, prune, root)
       const reconcile = planReconcileWrites(args.docs, areas, {
-        source: args.source, repository, root, sourceBranch: args['source-branch'], sourceMoved, skippedTags: 'write',
+        source: args.source, repository, root, sourceBranch: args['source-branch'], sourceMoved, writeSkippedTags: true,
       })
       const writable = planMirrorWrites({ args, repository, mirrors, releaseFiles: reconcile.files })
       const writes = [...reconcile.areas, ...writable]

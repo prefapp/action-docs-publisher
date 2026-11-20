@@ -79,7 +79,14 @@ describe('manual runs remain compatible with release shared files', () => {
     const run = runReconcile(world, source)
     expect(run.status).toBe(0)
     expect(readTree(readRemote(world), `${AREA}/alpha/1.0.0`)).toEqual(tree)
-    expect(remoteCommitCount(world)).toBe(before)
+    // The bytes stay, and the skip is recorded: the next run reuses it instead of building the tag again.
+    expect(remoteCommitCount(world)).toBe(before + 1)
+    expect(readJson(readRemote(world), `${AREA}/.skipped-tags.json`).tags['alpha-v1.0.0']).toEqual({
+      sourceRevision: git(source, 'rev-parse', 'refs/tags/alpha-v1.0.0^{commit}'),
+      reason: 'content',
+      specHash: specHash(releaseEntry()),
+      detail: 'not found: schema.json',
+    })
     expect(run.summary).toContain('- Skipped `alpha-v1.0.0`: its content does not fit the entry (not found: schema.json).')
     expect(run.summary).not.toContain('Republished')
     expect(run.summary).not.toContain(`- Kept \`${AREA}/alpha/1.0.0\``)
@@ -98,7 +105,12 @@ describe('manual runs remain compatible with release shared files', () => {
 
     expect(run.status).toBe(0)
     expect(readTree(readRemote(world), `${AREA}/alpha/1.0.0`)).toEqual(tree)
-    expect(remoteCommitCount(world)).toBe(before)
+    expect(remoteCommitCount(world)).toBe(before + 1)
+    expect(readJson(readRemote(world), `${AREA}/.skipped-tags.json`).tags['alpha-v1.0.0']).toEqual({
+      sourceRevision: git(source, 'rev-parse', 'refs/tags/alpha-v1.0.0^{commit}'),
+      reason: 'no folder',
+      specHash: specHash(releaseEntry()),
+    })
     expect(run.summary).toContain('- Skipped `alpha-v1.0.0`: the package folder does not exist at that tag.')
   })
 
@@ -137,9 +149,11 @@ describe('manual runs remain compatible with release shared files', () => {
     expect(run.status).toBe(0)
     expect(remoteCommitCount(world)).toBe(before)
     expect(readTree(readRemote(world), `${AREA}/alpha/1.0.0`)).toEqual(tree)
+    // Only the commit moved, so the run names the doubt it has about the build, not about the spec.
     expect(run.summary).toContain(
-      `- Skipped \`${AREA}/alpha/1.0.0\`: the source branch \`main\` moved past the checkout`,
+      `- Skipped \`${AREA}/alpha/1.0.0\`: the source branch \`main\` moved past the checkout, so this run cannot tell whether a newer build of the tag is already published.`,
     )
+    expect(run.summary).not.toContain('newer spec')
     expect(run.summary).not.toContain('Republished')
   })
 

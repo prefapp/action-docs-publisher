@@ -133,6 +133,40 @@ describe('reporting the skips a run reused', () => {
     expect(run.summary).not.toContain('- Skipped `')
   })
 
+  test('names a fresh skip of the same tag in another Area beside the reuse', () => {
+    const counter = join(world.base, 'builds.log')
+    const entry = countingEntry(counter)
+    // Two Areas publish the same tag: one already recorded the skip, the other has to derive it again.
+    const second = releaseEntry({ area: 'core/extra', areaFiles: [], build: entry.build })
+    const source = makeSource(world)
+    releaseCommit(
+      source,
+      { ...featureFiles('alpha'), ...entriesFile([{ ...entry, areaFiles: [] }, second]) },
+      'alpha-v1.0.0',
+      DATE,
+    )
+    seedDocs(world, {
+      [SKIPPED]: `${JSON.stringify({
+        source: 'acme/source',
+        tags: {
+          'alpha-v1.0.0': {
+            sourceRevision: revision(source, 'alpha-v1.0.0'),
+            reason: 'content',
+            specHash: specHash(readEntries(join(source, '.github/docs_publisher.yaml'))[0]),
+            detail: 'build failed in packages/alpha (exit 1)',
+          },
+        },
+      }, null, 2)}\n`,
+    })
+
+    const run = runReconcile(world, source)
+
+    expect(run.status).toBe(0)
+    expect(buildCount(counter)).toBe(1)
+    expect(run.summary).toContain('- 1 previously skipped tag unchanged.')
+    expect(run.summary).toContain('- Skipped `alpha-v1.0.0`: its content does not fit the entry (build failed in packages/alpha (exit 1)).')
+  })
+
   test('keeps a newly skipped tag on its own line beside the count', () => {
     const counter = join(world.base, 'builds.log')
     const source = contentSkipSource(counter)
@@ -269,21 +303,89 @@ describe('keeping the Skipped tags file current', () => {
     expect(exists(landed, `${AREA}/alpha/1.0.0/.meta.json`)).toBe(true)
   })
 
-  test('never records a published tag whose moved commit no longer fits', () => {
+  test('records a published tag whose moved commit no longer fits, and reuses the skip next run', () => {
+    const counter = join(world.base, 'builds.log')
     const source = makeSource(world)
-    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    releaseCommit(source, {
+      ...featureFiles('alpha'),
+      'packages/alpha/BUILD_OK': '',
+      ...entriesFile([countingEntry(counter)]),
+    }, 'alpha-v1.0.0', DATE)
     expect(runReconcile(world, source).status).toBe(0)
-    expect(exists(readRemote(world), SKIPPED)).toBe(false)
+    expect(exists(readRemote(world), `${AREA}/alpha/1.0.0/.meta.json`)).toBe(true)
+    expect(buildCount(counter)).toBe(1)
+    // The tag moves onto a commit whose collect finds nothing, so the Version the docs hold cannot be rebuilt.
     commitSource(source, { 'packages/alpha/schema.json': null }, 'move the tag onto an unfit commit')
     git(source, 'tag', '-f', 'alpha-v1.0.0')
+
+    const moved = runReconcile(world, source)
+
+    expect(moved.status).toBe(0)
+    expect(buildCount(counter)).toBe(2)
+    let landed = readRemote(world)
+    // The older Version folder keeps its bytes, and the skip is recorded, so the next run need not build the tag again.
+    expect(exists(landed, `${AREA}/alpha/1.0.0/.meta.json`)).toBe(true)
+    expect(readJson(landed, SKIPPED).tags['alpha-v1.0.0']).toEqual({
+      sourceRevision: revision(source, 'alpha-v1.0.0'),
+      reason: 'content',
+      specHash: specHash(readEntries(join(source, '.github/docs_publisher.yaml'))[0]),
+      detail: 'not found: schema.json',
+    })
 
     const run = runReconcile(world, source)
 
     expect(run.status).toBe(0)
-    expect(run.summary).toContain('- Skipped `alpha-v1.0.0`: its content does not fit the entry (not found: schema.json).')
-    const landed = readRemote(world)
-    expect(exists(landed, SKIPPED)).toBe(false)
+    expect(buildCount(counter)).toBe(2)
+    expect(run.summary).toContain('- 1 previously skipped tag unchanged.')
+    expect(run.summary).not.toContain('Republished')
+    landed = readRemote(world)
     expect(exists(landed, `${AREA}/alpha/1.0.0/.meta.json`)).toBe(true)
+    expect(readJson(landed, SKIPPED).tags['alpha-v1.0.0'].sourceRevision).toBe(revision(source, 'alpha-v1.0.0'))
+  })
+
+  test('treats a tag deleted on origin as gone, however the checkout still holds it', () => {
+    const counter = join(world.base, 'builds.log')
+    const source = contentSkipSource(counter)
+    expect(runReconcile(world, source).status).toBe(0)
+    expect(exists(readRemote(world), SKIPPED)).toBe(true)
+    // A checkout made while the tag still existed: its fetch must not keep a ref origin has dropped.
+    const checkout = cloneSource(world, source, 'checkout-with-the-tag')
+    expect(git(checkout, 'tag', '--list', 'alpha-v1.0.0')).toBe('alpha-v1.0.0')
+    git(source, 'tag', '--delete', 'alpha-v1.0.0')
+
+    const run = runPublisher(cloneDocs(world), { source: checkout, reconcile: true })
+
+    expect(run.status).toBe(0)
+    expect(buildCount(counter)).toBe(1)
+    expect(exists(readRemote(world), SKIPPED)).toBe(false)
+    expect(run.summary).not.toContain('previously skipped')
+  })
+
+  test('reuses a content record that carries no detail', () => {
+    const counter = join(world.base, 'builds.log')
+    const source = contentSkipSource(counter)
+    // A record without the reason line is still a skip of a known commit under a known spec: no build re-derives it.
+    seedDocs(world, {
+      [SKIPPED]: `${JSON.stringify({
+        source: 'acme/source',
+        tags: {
+          'alpha-v1.0.0': {
+            sourceRevision: revision(source, 'alpha-v1.0.0'),
+            reason: 'content',
+            specHash: specHash(readEntries(join(source, '.github/docs_publisher.yaml'))[0]),
+          },
+        },
+      }, null, 2)}\n`,
+    })
+
+    const run = runReconcile(world, source)
+
+    expect(run.status).toBe(0)
+    expect(buildCount(counter)).toBe(0)
+    expect(run.summary).toContain('- 1 previously skipped tag unchanged.')
+    expect(run.summary).not.toContain('its content does not fit')
+    // The record is reused as it is: the run adds no reason it never derived.
+    expect(readJson(readRemote(world), SKIPPED).tags['alpha-v1.0.0'].detail).toBeUndefined()
   })
 
   test('leaves the file untouched when the source branch moved past the checkout', () => {

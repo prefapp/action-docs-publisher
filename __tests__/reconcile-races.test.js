@@ -205,6 +205,82 @@ describe('a reconcile that runs again or loses a race', () => {
     expect(rejected.summary).toContain(`- Skipped \`${AREA}/alpha/1.0.0\`: the source branch \`main\` moved past the checkout`)
   }, 30000)
 
+  test('rebuilds a tag that moved while its push waited, and records the commit it built', async () => {
+    const ready = join(world.base, 'tag-moved-ready')
+    const resume = join(world.base, 'tag-moved-resume')
+    const source = featuresSource({
+      releases: [{ tag: 'alpha-v1.0.0', date: '2026-01-01T00:00:00Z', files: packageFiles('alpha') }],
+      entries: [releaseEntry({ areaFiles: [] })],
+    })
+    const checkout = cloneSource(world, source, 'source-tag-moved')
+    const docs = cloneDocs(world, 'docs-tag-moved')
+    write(docs, { '.git/hooks/pre-push': `#!/bin/sh\ntouch "${ready}"; while [ ! -f "${resume}" ]; do sleep 0.01; done\n` })
+    chmodSync(join(docs, '.git/hooks/pre-push'), 0o755)
+    const pending = startPublisher(docs, { source: checkout, reconcile: true })
+    let moved
+    try {
+      await waitForFile(ready)
+      // The tag moves onto another commit while the first attempt waits for its rejected push, and another writer moves
+      // the docs branch so the push is rejected and the run plans again.
+      commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# RETAGGED\n' }, 'move the tag')
+      git(source, 'tag', '--force', 'alpha-v1.0.0')
+      moved = git(source, 'rev-parse', 'HEAD')
+      const writer = cloneDocs(world, 'other-tag-moved-writer')
+      write(writer, { 'site/raw/elsewhere/keep.txt': 'keep\n' })
+      git(writer, 'add', '-A')
+      git(writer, 'commit', '--quiet', '-m', 'docs: another writer')
+      git(writer, 'push', '--quiet', 'origin', 'HEAD:refs/heads/main')
+    } finally {
+      write(world.base, { 'tag-moved-resume': '' })
+    }
+    const run = await pending
+
+    expect(run.status).toBe(0)
+    expect(run.output).toContain('Push to "main" rejected (attempt 1 of 5), syncing and retrying')
+    const landed = readRemote(world)
+    expect(readFile(landed, `${AREA}/alpha/1.0.0/intro.md`)).toBe('# RETAGGED\n')
+    expect(readJson(landed, `${AREA}/alpha/1.0.0/.meta.json`).sourceRevision).toBe(moved)
+  }, 20000)
+
+  test('leaves the Skipped tags file a newer run wrote while its push was rejected', async () => {
+    const ready = join(world.base, 'skips-ready')
+    const resume = join(world.base, 'skips-resume')
+    const counter = join(world.base, 'skips-builds.log')
+    const skipped = `${AREA}/.skipped-tags.json`
+    const source = featuresSource({
+      releases: [{ tag: 'alpha-v1.0.0', date: '2026-01-01T00:00:00Z', files: packageFiles('alpha') }],
+      // An Area with no Area files still owns its Skipped tags file.
+      entries: [releaseEntry({ areaFiles: [], build: `echo build >> "${counter}"; test -f BUILD_OK` })],
+    })
+    const docs = cloneDocs(world, 'docs-skips')
+    write(docs, { '.git/hooks/pre-push': `#!/bin/sh\ntouch "${ready}"; while [ ! -f "${resume}" ]; do sleep 0.01; done\n` })
+    chmodSync(join(docs, '.git/hooks/pre-push'), 0o755)
+    const pending = startPublisher(docs, { source: cloneSource(world, source, 'source-skips'), reconcile: true })
+    const newer = `${JSON.stringify({
+      source: 'acme/source',
+      tags: { 'alpha-v0.9.0': { sourceRevision: 'b'.repeat(40), reason: 'prerelease' } },
+    }, null, 2)}\n`
+    try {
+      await waitForFile(ready)
+      // Another run publishes a newer Skipped tags file while this one waits to retry.
+      const writer = cloneDocs(world, 'other-skips-writer')
+      write(writer, { [skipped]: newer })
+      git(writer, 'add', '-A')
+      git(writer, 'commit', '--quiet', '-m', 'docs: another run records its skips')
+      git(writer, 'push', '--quiet', 'origin', 'HEAD:refs/heads/main')
+    } finally {
+      write(world.base, { 'skips-resume': '' })
+    }
+    const run = await pending
+
+    expect(run.status).toBe(0)
+    expect(run.output).toContain('Push to "main" rejected (attempt 1 of 5), syncing and retrying')
+    expect(readFile(readRemote(world), skipped)).toBe(newer)
+    expect(run.summary).toContain(
+      `- Skipped Area files for \`${AREA}\`: the Area's shared files changed since Reconcile started.`,
+    )
+  }, 20000)
+
   test('keeps an Area file a newer release added while it waited to retry', async () => {
     const ready = join(world.base, 'notice-reconcile-ready')
     const resume = join(world.base, 'notice-reconcile-resume')

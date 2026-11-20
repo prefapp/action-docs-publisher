@@ -1,9 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { SEMVER_REGEX } from './entries.mjs'
-import { FatalError, SKIPPED_TAGS_FILE, assertAreaWritable, assertRecordOwners, assertNoSymlinkPath, existingVersionFolders, folderNames, markerRecordAt, markerRecords, lstatOrNull, metaFile, put, readMarkerRecord, writeFile, writeSummary } from './files.mjs'
+import { FatalError, assertAreaWritable, assertRecordOwners, assertNoSymlinkPath, existingVersionFolders, folderNames, markerRecordAt, markerRecords, lstatOrNull, metaFile, put, readMarkerRecord, writeFile, writeSummary } from './files.mjs'
 import { scan } from './prune.mjs'
 import { skippedRecordAt } from './skipped.mjs'
+import { SKIPPED_TAGS_FILE } from './area-names.mjs'
 import { docsRoot } from './root.mjs'
 
 // Ported from the former shared-file rebuilder. Build identifiers do not affect precedence.

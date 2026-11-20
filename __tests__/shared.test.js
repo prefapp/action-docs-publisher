@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from '@jest/globals'
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { cloneDocs, entriesFile, featureFiles, makeDocsRemote, makeSource, meta, readJson, readRemote, releaseCommit, releaseEntry, runPublisher, runReconcile, commitSource, git, readTree, readFile, exists, seedDocs, remoteCommitCount, renderedScript, write } from '../test/harness.mjs'
-
-const { readEntries } = await import(pathToFileURL(renderedScript('entries.mjs')).href)
-const { snapshotAreaState } = await import(pathToFileURL(renderedScript('shared.mjs')).href)
+import {
+  cloneDocs, entriesFile, featureFiles, makeDocsRemote, makeSource, meta, readJson, readRemote,
+  releaseCommit, releaseEntry, runPublisher, runReconcile, commitSource, git, readTree, readFile, exists,
+  seedDocs, remoteCommitCount,
+} from '../test/harness.mjs'
 
 let world
 beforeEach(() => { world = makeDocsRemote() })
@@ -187,24 +186,5 @@ describe('release shared files', () => {
         { name: 'sub/deep.md', url: `${BASE}/features/alpha/sub/deep.md` },
       ],
     }] })
-  })
-})
-
-describe('the freshness snapshot of an Area', () => {
-  test('covers the Skipped tags file, so a concurrent rewrite of it is seen', () => {
-    const skipped = (tags) => `${JSON.stringify({ source: 'acme/source', tags }, null, 2)}\n`
-    const SKIPPED = 'site/raw/features/.skipped-tags.json'
-    const source = makeSource(world)
-    commitSource(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'entry')
-    const docs = cloneDocs(world)
-    const [entry] = readEntries(join(source, '.github/docs_publisher.yaml'))
-    write(docs, { [SKIPPED]: skipped({ 'alpha-v0.9.0': { sourceRevision: 'a'.repeat(40), reason: 'prerelease' } }) })
-    const before = snapshotAreaState(docs, 'site/raw', 'site/raw/features', entry)
-
-    write(docs, { [SKIPPED]: skipped({ 'alpha-v0.8.0': { sourceRevision: 'b'.repeat(40), reason: 'prerelease' } }) })
-    const after = snapshotAreaState(docs, 'site/raw', 'site/raw/features', entry)
-
-    expect(before).toContain('.skipped-tags.json')
-    expect(after).not.toBe(before)
   })
 })

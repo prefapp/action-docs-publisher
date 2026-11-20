@@ -195,7 +195,7 @@ function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
   }
   applyPrune(snapshot, prune, root)
   const reconcile = planReconcileWrites(snapshot, areas, {
-    source: args.source, repository, root, sourceBranch: args['source-branch'], skippedTags: 'read',
+    source: args.source, repository, root, sourceBranch: args['source-branch'],
   })
   const add = (areaDir, line) => {
     if (!changes.has(areaDir)) changes.set(areaDir, [])
