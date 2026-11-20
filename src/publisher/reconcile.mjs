@@ -226,8 +226,21 @@ function reconcileSummary({ names, docsBranch, sourceBranch, changed, report }) 
   return [...lines, ...skippedReconcileLines({ sourceBranch, ...report })].join('\n')
 }
 
+// The tags a run kept skipping are summarized by their count: their names are history, and a plan comment that
+// repeats them all says nothing a reader acts on.
+function previouslySkippedLine(previouslySkipped) {
+  return `- ${previouslySkipped.length} previously skipped ${previouslySkipped.length === 1 ? 'tag' : 'tags'} unchanged.`
+}
+
 // `sourceBranch` names where the entries and tags are read from: a retirement is decided there, not in the docs repo.
-export function skippedReconcileLines({ sourceBranch, areaFilesSkipped, skipped, specStale = [], branchStale = [] }) {
+// `previouslySkipped` are the tags this run reused instead of re-deriving: one count line stands in for their names,
+// and `collapse` puts the tags it did re-derive inside a `<details>` block when there are more than ten of them.
+export function skippedReconcileLines({
+  sourceBranch, areaFilesSkipped, skipped, previouslySkipped = [], specStale = [], branchStale = [], collapse = false,
+}) {
+  // A tag this run reused stays out of the per-tag lines, whatever reason the record it read gives.
+  const reused = new Set(previouslySkipped.map(({ tag }) => tag))
+  const fresh = skipped.filter((pkg) => !reused.has(pkg.tag))
   const lines = areaFilesSkipped.map(({ dir, reason }) => `- Skipped Area files for \`${dir}\`: ${reason}.`)
   if (specStale.length > 0) {
     lines.push(`- Skipped ${list(specStale)}: the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell whether a newer spec is already published.`)
@@ -235,25 +248,36 @@ export function skippedReconcileLines({ sourceBranch, areaFilesSkipped, skipped,
   if (branchStale.length > 0) {
     lines.push(`- Skipped ${list(branchStale)}: the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell whether a newer build is already published.`)
   }
-  const retired = skipped.filter((pkg) => pkg.note === 'retired').map((pkg) => pkg.tag)
-  const noFolder = skipped.filter((pkg) => pkg.note === 'no folder').map((pkg) => pkg.tag)
-  if (retired.length > 0) lines.push(`- Skipped ${list(retired)}: the package folder is gone from \`${sourceBranch}\`, so the package is retired.`)
-  if (noFolder.length > 0) lines.push(`- Skipped ${list(noFolder)}: the package folder does not exist at that tag.`)
-  const missing = skipped.filter((pkg) => pkg.note === 'missing tag').map((pkg) => pkg.tag)
-  const prereleases = skipped.filter((pkg) => pkg.note === 'prerelease').map((pkg) => pkg.tag)
-  if (missing.length > 0) lines.push(`- Skipped ${list(missing)}: no such tag.`)
+  if (previouslySkipped.length > 0) lines.push(previouslySkippedLine(previouslySkipped))
+  // Every skipped tag is named by one of the lines below, whichever reason it carries.
+  const tags = []
+  const retired = fresh.filter((pkg) => pkg.note === 'retired').map((pkg) => pkg.tag)
+  const noFolder = fresh.filter((pkg) => pkg.note === 'no folder').map((pkg) => pkg.tag)
+  if (retired.length > 0) tags.push(`- Skipped ${list(retired)}: the package folder is gone from \`${sourceBranch}\`, so the package is retired.`)
+  if (noFolder.length > 0) tags.push(`- Skipped ${list(noFolder)}: the package folder does not exist at that tag.`)
+  const missing = fresh.filter((pkg) => pkg.note === 'missing tag').map((pkg) => pkg.tag)
+  const prereleases = fresh.filter((pkg) => pkg.note === 'prerelease').map((pkg) => pkg.tag)
+  if (missing.length > 0) tags.push(`- Skipped ${list(missing)}: no such tag.`)
   if (prereleases.length > 0) {
-    lines.push(`- Skipped ${list(prereleases)}: a prerelease, and the entry does not publish prereleases.`)
+    tags.push(`- Skipped ${list(prereleases)}: a prerelease, and the entry does not publish prereleases.`)
   }
-  const unfit = groupBy(skipped.filter((pkg) => pkg.note === 'content'), (pkg) => pkg.reason)
+  const unfit = groupBy(fresh.filter((pkg) => pkg.note === 'content'), (pkg) => pkg.reason)
   for (const [reason, packages] of unfit) {
-    lines.push(`- Skipped ${list(packages.map((pkg) => pkg.tag))}: its content does not fit the entry (${reason}).`)
+    tags.push(`- Skipped ${list(packages.map((pkg) => pkg.tag))}: its content does not fit the entry (${reason}).`)
+  }
+  // A batch of more than ten skipped tags is folded away, with the blank lines the block needs for its inner
+  // markdown to render. Real changes are never folded: only these skip lines reach here.
+  if (collapse && fresh.length > 10) {
+    lines.push(`<details><summary>Skipped ${fresh.length} tags</summary>`, '', ...tags, '', '</details>')
+  } else {
+    lines.push(...tags)
   }
   return lines
 }
 
-// `skippedTags` is the run that keeps the Area's Skipped tags file: a Reconcile reads it, reuses the skips whose
-// conditions still hold and writes it again. A Plan reads nothing and writes nothing, so it re-checks every tag.
+// `skippedTags` says what the run does with each Area's Skipped tags file: `'read'` (a Plan) reuses the skips the
+// file records and writes nothing, `'write'` (a Reconcile) reuses them and writes the file again, and `false`
+// ignores the file and so re-checks every tag.
 export function planReconcileWrites(docs, areas, { source, repository, root, sourceBranch, sourceMoved = false, skippedTags = false }) {
   const report = { published: [], republished: [], moved: [], branches: [], kept: [], stamped: [], untagged: [], skipped: [], previouslySkipped: [], areaFilesSkipped: [], specStale: [], branchStale: [] }
   const writes = new Map()
@@ -346,7 +370,7 @@ export function planReconcileWrites(docs, areas, { source, repository, root, sou
     // The Skipped tags file this run leaves: the tags it skipped and the state it skipped them under, so a later run
     // need not check them again. A run that cannot publish the Area's files (a moved source branch, a race) leaves
     // the docs copy as it is, and an Area with no skips left loses the file.
-    if (skipped && !skipReason) {
+    if (skippedTags === 'write' && !skipReason) {
       const rel = skippedTagsPath(area.areaDir)
       const tags = skippedTagsToRecord({ packages: area.packages, report, entry: area.entry, source })
       if (tags.size > 0) put(files, rel, skippedTagsFile({ source: repository, tags }))
@@ -456,7 +480,7 @@ export function publishReconcile({ args, repository, root }) {
       // stops here, before the prune deletes anything and before it writes into any Area.
       const pruned = applyPrune(args.docs, prune, root)
       const reconcile = planReconcileWrites(args.docs, areas, {
-        source: args.source, repository, root, sourceBranch: args['source-branch'], sourceMoved, skippedTags: true,
+        source: args.source, repository, root, sourceBranch: args['source-branch'], sourceMoved, skippedTags: 'write',
       })
       const writable = planMirrorWrites({ args, repository, mirrors, releaseFiles: reconcile.files })
       const writes = [...reconcile.areas, ...writable]

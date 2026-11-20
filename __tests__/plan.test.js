@@ -633,3 +633,145 @@ describe('a plan over an unmarked Mirror Area folder', () => {
     expect(readFile(readRemote(world), at('core/docs/hand-made/notes.md'))).toBe('# Notes\n')
   })
 })
+
+const SKIPPED = 'site/raw/features/.skipped-tags.json'
+const skippedTagsFile = (tags) => `${JSON.stringify({ source: 'acme/source', tags }, null, 2)}\n`
+
+// A build that leaves the evidence of having run, and fails wherever the tag's package folder holds no BUILD_OK.
+function countedEntry(counter) {
+  return releaseEntry({ build: `echo build >> "${counter}"; test -f BUILD_OK` })
+}
+
+// An Area whose only tag can be re-derived only by checking it out and building it. The Skipped tags file records the
+// skip under the spec and the commit it was skipped at, so a plan that reads it never runs the build.
+function recordedContentSkip(counter) {
+  const entry = countedEntry(counter)
+  const source = makeSource(world)
+  releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([entry]) }, 'alpha-v1.0.0', DATE)
+  const sourceRevision = git(source, 'rev-parse', 'refs/tags/alpha-v1.0.0^{commit}')
+  commitSource(source, { 'packages/alpha/BUILD_OK': '' }, 'make the package buildable')
+  const before = git(source, 'rev-parse', 'HEAD')
+  commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# Alpha 1.1\n' }, 'change the package')
+  seedDocs(world, {
+    'site/raw/features/README.md': '# Features\n',
+    [SKIPPED]: skippedTagsFile({
+      'alpha-v1.0.0': {
+        sourceRevision, reason: 'content', specHash: specHash(entry),
+        detail: 'build failed in packages/alpha (exit 1)',
+      },
+    }),
+  })
+  return { source, before }
+}
+
+describe('a plan over the Skipped tags file', () => {
+  test('reuses a recorded skip instead of checking out and building the tag', () => {
+    const counter = join(world.base, 'builds.log')
+    const { source, before } = recordedContentSkip(counter)
+
+    const run = plan(source, before)
+
+    expect(run.status).toBe(0)
+    expect(existsSync(counter)).toBe(false)
+    expect(run.body).toContain('- 1 previously skipped tag unchanged.')
+    expect(run.body).not.toContain('alpha-v1.0.0')
+    expect(run.body).not.toContain('.skipped-tags.json')
+    expect(run.body).toContain('No changes to add, republish, delete or replace.')
+  })
+})
+
+// A source repo whose tags all name no package folder: the plan re-derives every skip from the tag alone, without a
+// checkout, so a batch of them is exactly what the comment has to keep short.
+function noFolderTagsSource(tags, { areaFiles = [] } = {}) {
+  const source = makeSource(world)
+  commitSource(source, { ...entriesFile([releaseEntry({ areaFiles })]) }, 'an entry before any package folder')
+  for (const tag of tags) git(source, 'tag', tag)
+  const before = git(source, 'rev-parse', 'HEAD')
+  commitSource(source, { ...featureFiles('alpha') }, 'add the package folder')
+  return { source, before }
+}
+
+const tags = (count) => Array.from({ length: count }, (_, index) => `alpha-v1.0.${index}`)
+
+describe('the tags a plan re-derives from scratch', () => {
+  test('lists ten skipped tags inline', () => {
+    const { source, before } = noFolderTagsSource(tags(10))
+
+    const run = plan(source, before)
+
+    expect(run.status).toBe(0)
+    expect(run.body).not.toContain('<details>')
+    expect(run.body).toContain('- Skipped `alpha-v1.0.0`, `alpha-v1.0.1`')
+    expect(run.body).toContain('`alpha-v1.0.9`')
+    expect(run.body).not.toContain('- 10 previously skipped tags unchanged.')
+  })
+
+  test('folds eleven skipped tags into a details block that shows their count', () => {
+    const { source, before } = noFolderTagsSource(tags(11))
+
+    const run = plan(source, before)
+
+    expect(run.status).toBe(0)
+    const block = run.body.slice(run.body.indexOf('<details>'), run.body.indexOf('</details>') + '</details>'.length)
+    expect(block.startsWith('<details><summary>Skipped 11 tags</summary>\n\n- Skipped `alpha-v1.0.0`, `alpha-v1.0.1`')).toBe(true)
+    expect(block).toContain('`alpha-v1.0.10`')
+    expect(block.endsWith('\n\n</details>')).toBe(true)
+  })
+
+  test('never folds a real change in with the skipped tags', () => {
+    const { source, before } = noFolderTagsSource(tags(11), { areaFiles: [{ from: 'README.md', to: 'README.md' }] })
+
+    const run = plan(source, before)
+
+    expect(run.status).toBe(0)
+    const folded = run.body.slice(run.body.indexOf('<details>'), run.body.indexOf('</details>'))
+    expect(folded).not.toContain('Area file')
+    expect(run.body.replace(/<details>[\s\S]*?<\/details>/g, '')).toContain('- Add Area file `README.md`.')
+  })
+})
+
+describe('a plan over a damaged or stale Skipped tags file', () => {
+  test('reports the damaged file as a planning problem with exit zero, and changes nothing', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'packages/alpha/schema.json': '{"head":true}\n' })
+    seedDocs(world, { [SKIPPED]: '{' })
+
+    const run = plan(source, before)
+
+    expect(run.status).toBe(0)
+    expect(run.body).toContain('This change would fail to publish:\n- invalid .skipped-tags.json: site/raw/features/.skipped-tags.json')
+    expect(run.body).not.toMatch(/^- (Add|Replace|Delete) .*\.skipped-tags\.json/m)
+    expect(run.body).not.toContain(world.base)
+  })
+
+  test('re-derives a skip the record no longer covers, and never counts the file as a change', () => {
+    const counter = join(world.base, 'builds.log')
+    const entry = countedEntry(counter)
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([entry]) }, 'alpha-v1.0.0', DATE)
+    commitSource(source, { 'packages/alpha/BUILD_OK': '' }, 'make the package buildable')
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# Alpha 1.1\n' }, 'change the package')
+    // A record from an older spec: the tag has to be checked out and built again, and the file written again.
+    seedDocs(world, {
+      'site/raw/features/README.md': '# Features\n',
+      [SKIPPED]: skippedTagsFile({
+        'alpha-v1.0.0': {
+          sourceRevision: git(source, 'rev-parse', 'refs/tags/alpha-v1.0.0^{commit}'),
+          reason: 'content', specHash: '0'.repeat(64), detail: 'build failed in packages/alpha (exit 1)',
+        },
+      }),
+    })
+
+    const run = plan(source, before)
+
+    expect(run.status).toBe(0)
+    expect(existsSync(counter)).toBe(true)
+    expect(run.body).toContain('- Skipped `alpha-v1.0.0`: its content does not fit the entry (build failed in packages/alpha (exit 1)).')
+    expect(run.body).not.toContain('previously skipped')
+    expect(run.body).not.toContain('.skipped-tags.json')
+    expect(run.body).toContain('No changes to add, republish, delete or replace.')
+  })
+})

@@ -106,13 +106,47 @@ describe('the Skipped tags file a Reconcile writes', () => {
     expect(run.status).toBe(0)
     expect(buildCount(counter)).toBe(1)
     expect(remoteCommitCount(world)).toBe(commits)
-    expect(run.summary).toContain('- Skipped `alpha-v1.0.0`: its content does not fit the entry (build failed in packages/alpha (exit 1)).')
+    // The tag is not named again: the summary counts the skips it reused instead of repeating their history.
+    expect(run.summary).toContain('- 1 previously skipped tag unchanged.')
+    expect(run.summary).not.toContain('`alpha-v1.0.0`')
     expect(readJson(readRemote(world), SKIPPED).tags['alpha-v1.0.0']).toEqual({
       sourceRevision: revision(source, 'alpha-v1.0.0'),
       reason: 'content',
       specHash: specHash(readEntries(join(source, '.github/docs_publisher.yaml'))[0]),
       detail: 'build failed in packages/alpha (exit 1)',
     })
+  })
+})
+
+describe('reporting the skips a run reused', () => {
+  test('summarizes every tag it reused as one count line', () => {
+    const counter = join(world.base, 'builds.log')
+    const source = fourReasonsSource(countingEntry(counter))
+    expect(runReconcile(world, source).status).toBe(0)
+    const builds = buildCount(counter)
+
+    const run = runReconcile(world, source)
+
+    expect(run.status).toBe(0)
+    expect(buildCount(counter)).toBe(builds)
+    expect(run.summary).toContain('- 4 previously skipped tags unchanged.')
+    expect(run.summary).not.toContain('- Skipped `')
+  })
+
+  test('keeps a newly skipped tag on its own line beside the count', () => {
+    const counter = join(world.base, 'builds.log')
+    const source = contentSkipSource(counter)
+    expect(runReconcile(world, source).status).toBe(0)
+    // A tag at a commit whose build fails: this run has to check it out, while the recorded skip is reused.
+    git(source, 'tag', 'alpha-v1.1.0', 'HEAD~1')
+
+    const run = runReconcile(world, source)
+
+    expect(run.status).toBe(0)
+    expect(buildCount(counter)).toBe(2)
+    expect(run.summary).toContain('- 1 previously skipped tag unchanged.')
+    expect(run.summary).toContain('- Skipped `alpha-v1.1.0`: its content does not fit the entry (')
+    expect(run.summary).not.toContain('`alpha-v1.0.0`')
   })
 })
 

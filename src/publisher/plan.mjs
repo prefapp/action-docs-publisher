@@ -116,6 +116,8 @@ function recordReleaseChanges({ args, areas, report, add }) {
       sourceBranch: args['source-branch'],
       areaFilesSkipped: report.areaFilesSkipped.filter(({ dir }) => dir === area.areaDir),
       skipped: report.skipped.filter((pkg) => area.packages.includes(pkg)),
+      previouslySkipped: report.previouslySkipped.filter(({ areaDir }) => areaDir === area.areaDir),
+      collapse: true,
     })) add(area.areaDir, line)
   }
 }
@@ -193,7 +195,7 @@ function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
   }
   applyPrune(snapshot, prune, root)
   const reconcile = planReconcileWrites(snapshot, areas, {
-    source: args.source, repository, root, sourceBranch: args['source-branch'],
+    source: args.source, repository, root, sourceBranch: args['source-branch'], skippedTags: 'read',
   })
   const add = (areaDir, line) => {
     if (!changes.has(areaDir)) changes.set(areaDir, [])
