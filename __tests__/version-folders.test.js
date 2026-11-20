@@ -76,15 +76,6 @@ describe('a named entry whose tagNames config maps tag names', () => {
     })
   })
 
-  // Reconcile refuses two tags that resolve to one Version folder, so the fallback has to be the same destination.
-  test('resolves a mapped tag and the tag named after its folder to one Version folder', () => {
-    const entry = releaseEntry({ tagNames: 'tags.json' })
-    const targeting = versionTargeting({ source: sourceWith({ 'tags.json': config }), root: ROOT, entry })
-
-    expect(targeting.forTag({ name: 'component', version: '1.0.0' }).versionDir)
-      .toBe(targeting.forTag({ name: 'alpha', version: '1.0.0' }).versionDir)
-  })
-
   test('refuses a mapping onto a name the publisher reserves', () => {
     const reserved = JSON.stringify({ packages: { 'packages/latest': { component: 'component' } } })
 

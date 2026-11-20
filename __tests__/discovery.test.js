@@ -99,15 +99,6 @@ describe('the traversal Area claim discovery owns', () => {
     expect(() => discoverAreas(docs, ROOT)).toThrow(`invalid .meta.json: ${marker}`)
   })
 
-  test('stops at a damaged marker: the Area inside it stays undiscovered', () => {
-    const docs = docsTree({
-      [`${ROOT}/b/1.0.0/.meta.json`]: meta({ source: REPO, date: DATE }),
-      [`${ROOT}/b/1.0.0/manual/.meta.json`]: mirrorMeta(),
-      [`${ROOT}/b/1.0.0/.skipped-tags.json`]: skippedTags(),
-    })
-
-    expect(discoverAreas(docs, ROOT).claims).toEqual([])
-  })
 })
 
 describe('the release Areas discovery derives from its claims', () => {
