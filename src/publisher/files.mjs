@@ -403,31 +403,6 @@ export function markerRecordAt(docs, root, dir) {
   return readMarkerRecord(fs.readFileSync(path.join(docs, marker), 'utf8'), marker, root)
 }
 
-// Every record under a folder, excluding the folder itself. A Version's content has its own nesting guards.
-// Prune can defer damaged version-shaped folders it does not affect; the reader still refuses their metadata.
-export function markerRecords(docs, root, base = root, onInvalid) {
-  const records = []
-  const walk = (dir) => {
-    for (const name of folderNames(path.join(docs, dir)).sort()) {
-      // A docs root of `.` scans the checkout itself: its `.git` folder is Git's, never an Area's.
-      if (namesGitPath(name)) continue
-      const child = path.posix.join(dir, name)
-      // Discovery never follows a marker symlink; the write and prune tree guards refuse affected links.
-      if (lstatOrNull(path.join(docs, child, '.meta.json'))?.isSymbolicLink()) { walk(child); continue }
-      let record
-      try { record = markerRecordAt(docs, root, child) } catch (error) {
-        if (!(error instanceof FatalError) || !onInvalid) throw error
-        onInvalid(child, error)
-        continue
-      }
-      if (record) records.push(record)
-      if (record?.kind !== 'Version') walk(child)
-    }
-  }
-  if (lstatOrNull(path.join(docs, base))?.isDirectory()) walk(base)
-  return records
-}
-
 // Every kind of record claims an Area in the same way. The caller supplies all Areas it will change, including
 // retired Areas with no surviving entry.
 export function assertMarkerOwner(record, area, repository) {

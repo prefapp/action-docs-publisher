@@ -33,7 +33,7 @@ import {
 } from './files.mjs'
 import { publishWithRetry, originTagRevision, sourceBranchMoved, syncToBranch } from './push.mjs'
 import { applySkippedTagsChange, planTagClear, readSkippedTags } from './skipped.mjs'
-import { scan } from './prune.mjs'
+import { discoverAreas } from './discovery.mjs'
 import { planSharedArea, snapshotAreaState, writeSharedArea } from './shared.mjs'
 
 // One package folder's collected content, keyed under `dir`. A Version folder and a Branch Version folder hold the
@@ -329,7 +329,7 @@ function publishAtTag({ args, release, repository, root, date, tagSource, source
       }
       // A Branch Version marker names its release Area, so it can prove the Area belongs to another repo: a release
       // stops here, before it writes a Version folder or an Area file.
-      try { assertRecordOwners(scan(args.docs, root).records, areas.map((area) => area.areaDir), root, repository) } catch (error) {
+      try { assertRecordOwners(discoverAreas(args.docs, root).claims, areas.map((area) => area.areaDir), root, repository) } catch (error) {
         if (!(error instanceof FatalError)) throw error
         problems.push(error.message)
       }

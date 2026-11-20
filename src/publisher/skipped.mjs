@@ -57,7 +57,7 @@ export function readSkippedTags(docs, areaDir) {
 // and no Version folder is still an Area another repo may not publish into, and Prune may delete.
 export function skippedRecordAt(docs, areaDir) {
   const file = readSkippedTagsFile(docs, areaDir)
-  return file === null ? null : { kind: 'Skipped', source: file.source, dir: areaDir, areaDir }
+  return file === null ? null : { kind: 'Skipped', source: file.source, dir: areaDir, areaDir, rel: skippedTagsPath(areaDir) }
 }
 
 // The file's bytes: the owner, then one entry per tag in a fixed order, so a run that changes nothing rewrites the

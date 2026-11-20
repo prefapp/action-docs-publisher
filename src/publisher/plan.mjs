@@ -19,7 +19,8 @@ import {
   writeSummary,
 } from './files.mjs'
 import { planReconcileSharedAreas, planReconcileWrites, prepareReconcile, skippedReconcileLines } from './reconcile.mjs'
-import { applyPrune, planPrune, scan } from './prune.mjs'
+import { applyPrune, planPrune } from './prune.mjs'
+import { discoverAreas } from './discovery.mjs'
 import { planMirrorWrites } from './mirror.mjs'
 import { docsRoot } from './root.mjs'
 
@@ -36,9 +37,9 @@ function writeIrrelevantPlan(file) {
   fs.writeFileSync(file, `${MARKER}\n${IRRELEVANT}\n## Docs publisher plan\n\nThis pull request no longer changes docs publishing.\n`)
 }
 
-function planRemovals({ args, prune, observed, add }) {
+function planRemovals({ args, prune, versions, branches, add }) {
   const changedAreas = new Set()
-  const branchDirs = new Set(observed.branches.map((branch) => branch.dir))
+  const branchDirs = new Set(branches.map((branch) => branch.dir))
   for (const { dir, kind, reason, areaDir: branchArea } of prune.removals) {
     // A Branch Version folder names its Area in the plan (it holds no Version folder to find one in).
     const areaDir = branchArea
@@ -50,12 +51,12 @@ function planRemovals({ args, prune, observed, add }) {
     } else if (branchDirs.has(dir)) {
       add(areaDir, `- Delete Branch Version folder \`${dir.slice(areaDir.length + 1)}\`: ${reason}.`)
     } else {
-      for (const version of observed.versions.filter((version) => version.dir.startsWith(`${dir}/`) || version.dir === dir)) {
+      for (const version of versions.filter((version) => version.dir.startsWith(`${dir}/`) || version.dir === dir)) {
         add(areaDir, `- Delete version \`${version.dir.slice(areaDir.length + 1)}\`: ${reason}.`)
       }
     }
   }
-  for (const version of observed.versions) {
+  for (const version of versions) {
     if (prune.isPruned(version.dir) && !tagExists(args.source, version.tag)) {
       add(version.areaDir, `- Warning: deleting version \`${version.dir.slice(version.areaDir.length + 1)}\`: no tag exists to rebuild it from.`)
     }
@@ -180,7 +181,9 @@ function recordSharedChanges({ docs, shared, changes, add }) {
 
 function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
   assertNoSymlinkPath(args.docs, root)
-  const observed = scan(args.docs, root)
+  const observed = discoverAreas(args.docs, root)
+  const versions = observed.claims.filter((claim) => claim.kind === 'Version')
+  const branches = observed.claims.filter((claim) => claim.kind === 'Branch')
   const prune = planPrune({ docs: args.docs, source: args.source, root, repository, entries })
   const areas = prepareReconcile({ args, repository, root, prune })
   // A Branch Version marker names its release Area, so it can prove the Area belongs to another repo: the plan says
@@ -200,7 +203,7 @@ function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
     if (!changes.has(areaDir)) changes.set(areaDir, [])
     changes.get(areaDir).push(line)
   }
-  const changedAreas = planRemovals({ args, prune, observed, add })
+  const changedAreas = planRemovals({ args, prune, versions, branches, add })
   const sourceRevision = git(args.source, ['rev-parse', 'HEAD'])
   const mirrors = mirrorPlaceholders({ args, repository, root, entries, sourceRevision, changedAreas, add })
   const writable = planMirrorWrites({ args: { ...args, docs: snapshot }, repository, mirrors, releaseFiles: reconcile.files })

@@ -33,7 +33,7 @@ import {
   unnamedReleaseEntry,
 } from '../test/harness.mjs'
 
-const { scan } = await import(renderedScript('prune.mjs'))
+const { discoverAreas } = await import(renderedScript('discovery.mjs'))
 
 const DATE = '2026-01-02T03:04:05Z'
 const CRDS_AREA = 'site/raw/core/crds'
@@ -473,14 +473,15 @@ describe('the Branch Version folder marker', () => {
         source: 'acme/source', sourceRevision: revision, sourceBranch: 'main', date: DATE,
       }))
 
-      const found = scan(dir, 'site/raw')
+      const found = discoverAreas(dir, 'site/raw')
+      const claims = (kind) => found.claims.filter((claim) => claim.kind === kind)
 
-      expect(found.branches).toEqual([{
+      expect(claims('Branch')).toEqual([{
         dir: 'site/raw/core/crds/main', areaDir: 'site/raw/core/crds', area: 'core/crds', name: null,
         branch: 'main', source: 'acme/source', kind: 'Branch', sourceRevision: 'a'.repeat(40), date: DATE,
       }])
-      expect(found.mirrors.map((mirror) => mirror.dir)).toEqual(['site/raw/core/docs'])
-      expect(found.versions.map((version) => version.dir)).toEqual(['site/raw/core/crds/v1.2.0'])
+      expect(claims('Mirror').map((mirror) => mirror.dir)).toEqual(['site/raw/core/docs'])
+      expect(claims('Version').map((version) => version.dir)).toEqual(['site/raw/core/crds/v1.2.0'])
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

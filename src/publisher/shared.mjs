@@ -1,8 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { SEMVER_REGEX } from './entries.mjs'
-import { FatalError, assertAreaWritable, assertRecordOwners, assertNoSymlinkPath, existingVersionFolders, folderNames, markerRecordAt, markerRecords, lstatOrNull, metaFile, put, readMarkerRecord, writeFile, writeSummary } from './files.mjs'
-import { scan } from './prune.mjs'
+import { FatalError, assertAreaWritable, assertRecordOwners, assertNoSymlinkPath, existingVersionFolders, folderNames, markerRecordAt, lstatOrNull, metaFile, put, readMarkerRecord, writeFile, writeSummary } from './files.mjs'
+import { discoverAreas, markerRecords } from './discovery.mjs'
 import { skippedRecordAt } from './skipped.mjs'
 import { SKIPPED_TAGS_FILE } from './area-names.mjs'
 import { docsRoot } from './root.mjs'
@@ -102,20 +102,16 @@ export function placementProblems(docs, root, areaDir, versions) {
       return null
     }
   }
-  const scanned = scan(docs, root)
-  const records = scanned.records
+  const discovered = discoverAreas(docs, root)
+  const releaseAreas = discovered.releaseAreas()
   const scope = docsRoot(root)
-  // A Skipped tags file claims the folder it sits in as an Area, so a release Area may not sit inside one: the file
-  // is the only proof that another Area already published there.
-  const skippedAreas = new Set(scanned.skipped.map((record) => record.areaDir))
   const labels = { Version: 'Version folder', Branch: 'Branch Version folder', Mirror: 'mirror Area' }
   for (let dir = areaDir; scope.contains(dir); dir = path.posix.dirname(dir)) {
     const record = read(dir)
     if (record) problems.push(`refusing to publish ${areaDir}: it sits inside a ${labels[record.kind]} at ${dir}`)
-    if (dir !== areaDir && skippedAreas.has(dir)) {
-      problems.push(`refusing to publish ${areaDir}: it sits inside a release Area at ${dir}`)
-    }
-    if (dir !== areaDir && records.some((record) => record.areaDir === dir && record.dir !== dir)) {
+    // A Version folder, a Branch Version folder or a Skipped tags file claims the release Area it sits in, so a
+    // release Area may not sit inside one: the docs mark another Area there.
+    if (dir !== areaDir && releaseAreas.has(dir)) {
       problems.push(`refusing to publish ${areaDir}: it sits inside a release Area at ${dir}`)
     }
   }
@@ -123,9 +119,9 @@ export function placementProblems(docs, root, areaDir, versions) {
     const parent = path.posix.dirname(version.versionDir)
     if (parent !== areaDir && read(parent)) problems.push(`refusing to publish ${version.versionDir}: it sits inside a mirror Area at ${parent}`)
   }
-  // A Mirror Area never sits inside a release Area. The scan skips a Version folder's inside, which `versionFiles`
+  // A Mirror Area never sits inside a release Area. The walk skips a Version folder's inside, which `versionFiles`
   // covers: a marker there is refused with the same message.
-  for (const mirror of scanned.mirrors) {
+  for (const mirror of discovered.claims.filter((claim) => claim.kind === 'Mirror')) {
     if (mirror.dir.startsWith(`${areaDir}/`)) problems.push(mirrorAreaProblem(areaDir, mirror.dir))
   }
   return problems
