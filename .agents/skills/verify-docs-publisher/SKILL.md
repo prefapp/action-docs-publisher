@@ -70,6 +70,7 @@ Follow the exact recipes in [features/](features/README.md):
 - [Push run](features/push-run.md)
 - [PR plan comment](features/pr-plan-comment.md)
 - [Skipped and moved tags](features/skipped-and-moved-tags.md)
+- [Skipped tags lifecycle](features/skipped-tags-lifecycle.md)
 
 ## Evidence
 
@@ -83,7 +84,7 @@ Store every proof under `/tmp/verify-docs-publisher-evidence/<run-id>/<feature>/
   --docs-paths "site/raw/features/.skipped-tags.json,site/raw/features/hello-world/1.0.78873/.meta.json"
 ```
 
-Pass `--pr <number>` when capturing a Plan mode run so `pr-comments.json` is saved.
+Pass `--pr <number>` when capturing a Plan mode run so `pr-comments.json` is saved. Pass `--compare <base-sha>` when the proof is a commit's changed-file list, such as a Version folder that must stay untouched or a same-commit write; `docs-compare.json` then holds the `filename` and `status` of every file changed between `<base-sha>` and `verify-<run-id>`.
 
 Proof standards:
 
@@ -124,5 +125,5 @@ The skill ships one executable script: [scripts/sandbox.sh](scripts/sandbox.sh).
 | `sandbox.sh launch --sha <40-char-sha> [--run-id <id>]` | Cut `verify-<run-id>` on `docs-e2e`, pin `features` workflow, wait for pin run. |
 | `sandbox.sh doctor [--run-id <id>]` | Read-only check of auth, workflow pin, branch existence, `docs-e2e` `main` integrity, and active runs. |
 | `sandbox.sh wait-run --event <event> [--head-sha <sha>] [--branch <branch>] [--after <iso-ts>] [--timeout <sec>] [--allow-failure]` | Wait for a matching `docs-publisher.yml` run to complete and print its JSON summary. `--timeout` defaults to 1800 s because a first Reconcile evaluates every tag. |
-| `sandbox.sh capture --run-id <id> --feature <slug> --workflow-run-id <gh-run-id> [--pr <num>] [--docs-paths <p1,p2>]` | Save run metadata, logs, Docs repo commits, requested Docs repo files, and optional PR comments into `/tmp/verify-docs-publisher-evidence/<run-id>/<feature>/`. |
+| `sandbox.sh capture --run-id <id> --feature <slug> --workflow-run-id <gh-run-id> [--pr <num>] [--docs-paths <p1,p2>] [--compare <base-sha>]` | Save run metadata, logs, Docs repo commits, requested Docs repo files, an optional `docs-compare.json` changed-file list against a base commit, and optional PR comments into `/tmp/verify-docs-publisher-evidence/<run-id>/<feature>/`. |
 | `sandbox.sh cleanup --run-id <id>` | Remove verification PRs, branches, tags, and `verify-<run-id>` on `docs-e2e`, restore `features` `main`, delete scratch workspace, and keep evidence. |

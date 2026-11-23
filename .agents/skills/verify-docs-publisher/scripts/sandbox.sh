@@ -20,7 +20,7 @@ Usage:
   sandbox.sh launch --sha <40-char-sha> [--run-id <id>]
   sandbox.sh doctor [--run-id <id>]
   sandbox.sh wait-run --event <event> [--head-sha <sha>] [--branch <branch>] [--after <iso-ts>] [--timeout <sec>] [--allow-failure]   # --timeout defaults to 1800
-  sandbox.sh capture --run-id <id> --feature <slug> --workflow-run-id <gh-run-id> [--pr <num>] [--docs-paths <p1,p2>]
+  sandbox.sh capture --run-id <id> --feature <slug> --workflow-run-id <gh-run-id> [--pr <num>] [--docs-paths <p1,p2>] [--compare <base-sha>]
   sandbox.sh cleanup --run-id <id>
 EOF
 }
@@ -271,7 +271,7 @@ cmd_doctor() {
 }
 
 cmd_capture() {
-  local run_id="" feature="" wf_run_id="" pr_num="" docs_paths=""
+  local run_id="" feature="" wf_run_id="" pr_num="" docs_paths="" compare_base=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --run-id) run_id="$2"; shift 2 ;;
@@ -279,6 +279,7 @@ cmd_capture() {
       --workflow-run-id) wf_run_id="$2"; shift 2 ;;
       --pr) pr_num="$2"; shift 2 ;;
       --docs-paths) docs_paths="$2"; shift 2 ;;
+      --compare) compare_base="$2"; shift 2 ;;
       *) die "unknown capture flag: $1" ;;
     esac
   done
@@ -301,6 +302,12 @@ cmd_capture() {
   gh api "repos/${DOCS_REPO}/commits?sha=${DOCS_BRANCH}&per_page=10" \
     --jq '[.[] | {sha: .sha, date: .commit.committer.date, message: .commit.message}]' \
     > "${out_dir}/docs-commits.json"
+
+  if [[ -n "${compare_base}" ]]; then
+    gh api "repos/${DOCS_REPO}/compare/${compare_base}...${DOCS_BRANCH}" \
+      --jq '[.files[] | {filename, status}]' \
+      > "${out_dir}/docs-compare.json"
+  fi
 
   if [[ -n "${pr_num}" ]]; then
     gh api "repos/${SOURCE_REPO}/issues/${pr_num}/comments" \

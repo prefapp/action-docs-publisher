@@ -20,10 +20,13 @@ This directory is the maintained source for verifying the user-facing behavior o
 - The first Reconcile of a session evaluates every historical tag, so it runs much longer than later runs: `sandbox.sh wait-run` defaults to `--timeout 1800`. Pass a larger `--timeout` only when a run legitimately exceeds that.
 - Pushing to `pre-vieitesss/features` `main` triggers `release-please`, which may synchronize its open release PRs and start read-only `pull_request` plan runs. These runs do not write to `pre-vieitesss/docs-e2e` and do not block `sandbox.sh doctor`.
 - Never remove `/tmp/verify-docs-publisher-evidence/$RUN_ID/` during cleanup.
+- A run that is expected to fail needs `sandbox.sh wait-run … --allow-failure`; without it the helper exits non-zero on the non-success conclusion.
+- A run that commits nothing is proven by an empty `DOCS_COMMIT_SHA:` line together with an unchanged head in `docs-commits.json`.
 
 ## Proof and skip reporting
 
 - Capture both the workflow run (`run.json`, `run.log`) and the resulting Docs repo state (`docs-commits.json`, fetched `docs-files/`) via `sandbox.sh capture`.
+- Pass `--compare <base-sha>` to `capture` to also write `docs-compare.json`, the changed-file list of `docs-e2e` `<base-sha>...verify-<run-id>` (`filename` and `status` per file). Use it to prove that two writes landed in the same commit, that a Version folder was untouched, or that a prune deleted an Area folder.
 - For Plan mode, also capture `pr-comments.json` with `--pr <number>`.
 - Check the `Record publish outputs` step in `run.log` or the job summary table for `run-mode`, `docs-changed`, and `docs-commit-sha`.
 - Read `docs-changed` from the `DOCS_CHANGED:` line of the `Record publish outputs` step in `run.log`; a `docs-changed: false` run prints `DOCS_COMMIT_SHA:` with no value. Grepping `run.log` directly for `docs-changed` is unreliable in a long run because the step prints env lines, not a summary line.
@@ -46,3 +49,4 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Push run](./push-run.md) covers refreshing changed `areaFiles` on `main` without touching Version folders, and escalating to Reconcile when `.github/docs_publisher.yaml` changes.
 - [PR plan comment](./pr-plan-comment.md) covers posting and updating the sticky plan comment, clearing it when docs changes are reverted, and keeping the Docs repo read-only.
 - [Skipped and moved tags](./skipped-and-moved-tags.md) covers writing and reusing `.skipped-tags.json`, folding large skip lists in PR plans, and republishing a Version folder when its tag moves.
+- [Skipped tags lifecycle](./skipped-tags-lifecycle.md) covers what happens to a tag after it is recorded as skipped: a Release run publishing it and clearing the record, a moved tag whose content fails, a skipped Release run, a deleted tag, a corrupted file, and an Area holding only `.skipped-tags.json`.
