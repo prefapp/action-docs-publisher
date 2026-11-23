@@ -6,6 +6,7 @@ import {
   entriesFile,
   exists,
   featureFiles,
+  git,
   makeDocsRemote,
   makeSource,
   meta,
@@ -13,6 +14,7 @@ import {
   readFile,
   readJson,
   readRemote,
+  readTree,
   releaseCommit,
   releaseEntry,
   remoteCommitCount,
@@ -422,5 +424,144 @@ describe('Version folders with no tag in this repo', () => {
 
     expect(run.status).toBe(0)
     expect(run.summary).not.toContain('no matching tag')
+  })
+})
+
+const SKIPPED = '.skipped-tags.json'
+const skippedFile = (source, tags = {}) => `${JSON.stringify({ source, tags }, null, 2)}\n`
+
+describe('pruning an Area whose only record is the Skipped tags file', () => {
+  // A Release Area another run left with the Skipped tags file alone: no Version folder, no Branch Version folder.
+  function fileOnlyArea(area, source = REPO, tags = {}) {
+    return { [`${area}/${SKIPPED}`]: skippedFile(source, tags) }
+  }
+
+  test.each([
+    ['a manual run', runManual],
+    ['a push', runPush],
+  ])('%s deletes it when its entry is gone, and names it in the summary', (_name, run) => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry(), unnamedReleaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    seedDocs(world, fileOnlyArea(CRDS, REPO, {
+      'v0.9.0': { sourceRevision: 'b'.repeat(40), reason: 'no folder', specHash: 'c'.repeat(64) },
+    }))
+    commitSource(source, entriesFile([releaseEntry()]), 'drop the crds entry')
+
+    const result = run(source)
+
+    expect(result.status).toBe(0)
+    expect(exists(readRemote(world), CRDS)).toBe(false)
+    expect(result.summary).toContain('Pruned `site/raw/core/crds`: its entry is gone from docs_publisher.yaml.')
+  })
+
+  test('deletes it when its entry becomes a mirror, and the mirror takes the Area', () => {
+    const source = makeSource(world)
+    commitSource(source, {
+      ...featureFiles('alpha'),
+      'docs/a.md': '# a\n',
+      ...entriesFile([releaseEntry(), mirrorEntry({ area: 'core/crds' })]),
+    }, 'now a mirror')
+    seedDocs(world, fileOnlyArea(CRDS))
+
+    const run = runPush(source)
+
+    expect(run.status).toBe(0)
+    const landed = readRemote(world)
+    expect(exists(landed, `${CRDS}/${SKIPPED}`)).toBe(false)
+    expect(readFile(landed, `${CRDS}/a.md`)).toBe('# a\n')
+    expect(readJson(landed, `${CRDS}/.meta.json`).source).toBe(REPO)
+    expect(run.summary).toContain('Pruned `site/raw/core/crds`: its entry is now in mirror mode.')
+  })
+
+  test('keeps the Area while its entry is still there', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry(), unnamedReleaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    seedDocs(world, fileOnlyArea(CRDS))
+    const before = git(source, 'rev-parse', 'HEAD')
+    commitSource(source, { 'packages/alpha/templates/docs/intro.md': '# alpha v2\n' }, 'change a package')
+    const after = git(source, 'rev-parse', 'HEAD')
+
+    const run = runPublisher(cloneDocs(world), { source: cloneSource(world, source, 'checkout-push'), before, after })
+
+    expect(run.status).toBe(0)
+    expect(readFile(readRemote(world), `${CRDS}/${SKIPPED}`)).toBe(skippedFile(REPO))
+    expect(run.summary).not.toContain('Pruned')
+  })
+
+  test('retires its top-level files when an unrelated child folder sits beside them', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    seedDocs(world, { ...fileOnlyArea(CRDS), [`${CRDS}/README.md`]: '# CRDS\n', [`${CRDS}/by-hand/notes.md`]: '# By hand\n' })
+
+    const run = runManual(source)
+
+    expect(run.status).toBe(0)
+    const landed = readRemote(world)
+    // The file claimed the Area for this repo, so its own top-level files go; the folder it did not write stays.
+    expect(exists(landed, `${CRDS}/${SKIPPED}`)).toBe(false)
+    expect(exists(landed, `${CRDS}/README.md`)).toBe(false)
+    expect(readFile(landed, `${CRDS}/by-hand/notes.md`)).toBe('# By hand\n')
+    expect(run.summary).toContain('Pruned from `main`')
+  })
+
+  test('never deletes a file another repo wrote, and leaves the Area standing', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    seedDocs(world, fileOnlyArea(CRDS, 'other/repo'))
+
+    const run = runManual(source)
+
+    expect(run.status).toBe(0)
+    expect(readFile(readRemote(world), `${CRDS}/${SKIPPED}`)).toBe(skippedFile('other/repo'))
+    expect(run.summary).not.toContain('Pruned')
+  })
+
+  test('stops, deleting nothing, when the file in an Area it would prune is damaged', () => {
+    const source = makeSource(world)
+    releaseCommit(
+      source,
+      { ...featureFiles('alpha'), 'index.yaml': 'v1', ...entriesFile([releaseEntry(), unnamedReleaseEntry()]) },
+      'alpha-v1.0.0',
+      DATE,
+    )
+    releaseCommit(source, { 'index.yaml': 'crds v1' }, 'v1.0.0', DATE)
+    expect(runManual(source).status).toBe(0)
+    seedDocs(world, { [`${CRDS}/${SKIPPED}`]: '{' })
+    commitSource(source, entriesFile([releaseEntry()]), 'drop the crds entry')
+    const commits = remoteCommitCount(world)
+
+    const run = runManual(source)
+
+    expect(run.status).toBe(2)
+    expect(run.output).toContain(`invalid .skipped-tags.json: ${CRDS}/${SKIPPED}`)
+    expect(remoteCommitCount(world)).toBe(commits)
+    expect(readFile(readRemote(world), `${CRDS}/${SKIPPED}`)).toBe('{')
+    expect(exists(readRemote(world), `${CRDS}/v1.0.0/.meta.json`)).toBe(true)
+  })
+
+  test('defers a damaged file in a folder it does not prune', () => {
+    const source = makeSource(world)
+    releaseCommit(source, { ...featureFiles('alpha'), ...entriesFile([releaseEntry()]) }, 'alpha-v1.0.0', DATE)
+    seedDocs(world, { 'site/raw/by-hand/.skipped-tags.json': '{' })
+
+    const run = runManual(source)
+
+    expect(run.status).toBe(0)
+    expect(readFile(readRemote(world), 'site/raw/by-hand/.skipped-tags.json')).toBe('{')
+    expect(exists(readRemote(world), `${FEATURES}/alpha/1.0.0/.meta.json`)).toBe(true)
+  })
+
+  test('does not treat a Skipped tags file inside a Version folder as an Area claim', () => {
+    const source = publishedSource()
+    // A tag's own content can carry the file's name: inside a Version folder it is that tag's content, not an Area.
+    seedDocs(world, { [`${FEATURES}/alpha/1.0.0/${SKIPPED}`]: skippedFile('other/repo') })
+    commitSource(source, entriesFile([]), 'drop the features entry')
+
+    const run = runManual(source)
+
+    expect(run.status).toBe(0)
+    const landed = readRemote(world)
+    expect(exists(landed, FEATURES)).toBe(false)
+    expect(run.summary).toContain(`- Pruned \`${FEATURES}/alpha\`, \`${FEATURES}/beta\`: its entry is gone from docs_publisher.yaml.`)
   })
 })

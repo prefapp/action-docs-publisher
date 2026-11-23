@@ -37,7 +37,7 @@ function run(source, mode, before) {
 
 describe('one validated record API for every marker', () => {
   const examples = [
-    { kind: 'Version', marker: `${AREA}/alpha/1.0.0/.meta.json`, fields: { source: SOURCE, tag: 'alpha-v1.0.0', date: DATE, specHash: 'a'.repeat(64) } },
+    { kind: 'Version', marker: `${AREA}/alpha/1.0.0/.meta.json`, fields: { source: SOURCE, tag: 'alpha-v1.0.0', sourceRevision: 'c'.repeat(40), date: DATE, specHash: 'a'.repeat(64) } },
     { kind: 'Branch', marker: `${AREA}/alpha/main/.meta.json`, fields: BRANCH },
     { kind: 'Mirror', marker: `${AREA}/.meta.json`, fields: { source: SOURCE, sourceRevision: 'b'.repeat(64), sourceBranch: 'main', date: DATE } },
   ]
@@ -49,13 +49,26 @@ describe('one validated record API for every marker', () => {
   })
 
   test.each(examples.flatMap((example) => Object.keys(example.fields).flatMap((field) => [undefined, ''].map((value) =>
-    ({ ...example, field, value }))).filter(({ field, value }) => field !== 'specHash' || value !== undefined)))(
+    ({ ...example, field, value }))).filter(({ kind, field, value }) => value !== undefined ||
+    !(field === 'specHash' || (kind === 'Version' && field === 'sourceRevision')))))(
     '$kind refuses $field = $value with the same marker-path diagnostic',
     ({ marker, fields, field, value }) => {
       expect(() => readMarkerRecord(meta({ ...fields, [field]: value }), marker, 'site/raw'))
         .toThrow(`invalid .meta.json: ${marker}`)
     },
   )
+
+  test('a Version marker may omit sourceRevision, and refuses one that is not a commit SHA', () => {
+    const marker = `${AREA}/alpha/1.0.0/.meta.json`
+    const fields = { source: SOURCE, tag: 'alpha-v1.0.0', date: DATE, specHash: 'a'.repeat(64) }
+    expect(readMarkerRecord(meta(fields), marker, 'site/raw').sourceRevision).toBeUndefined()
+    expect(readMarkerRecord(meta({ ...fields, sourceRevision: 'd'.repeat(64) }), marker, 'site/raw').sourceRevision)
+      .toBe('d'.repeat(64))
+    for (const sourceRevision of ['not-a-revision', 'a'.repeat(39), 'A'.repeat(40)]) {
+      expect(() => readMarkerRecord(meta({ ...fields, sourceRevision }), marker, 'site/raw'))
+        .toThrow(`invalid .meta.json: ${marker}`)
+    }
+  })
 
   test.each(examples)('$kind refuses broken JSON with the same marker-path diagnostic', ({ marker }) => {
     expect(() => readMarkerRecord('{', marker, 'site/raw')).toThrow(`invalid .meta.json: ${marker}`)

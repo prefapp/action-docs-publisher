@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import { FatalError, GLOB_CHARS, namesGitPath } from './files.mjs'
+import { GENERATED_AREA_NAMES } from './area-names.mjs'
 
 // Only settings that shape Version folder content belong in this hash.
 export function specHash({ collect, build, packages }) {
@@ -207,10 +208,8 @@ function validatePaths(list, fail) {
   }
 }
 
-const SHARED_FILE_NAMES = new Set(['index.json', 'versions.json', '.meta.json'])
-
-function isReservedName(name) {
-  return SHARED_FILE_NAMES.has(name) || name === 'latest' || SEMVER_REGEX.test(name.replace(/^v/, ''))
+export function isReservedName(name) {
+  return GENERATED_AREA_NAMES.has(name) || name === 'latest' || SEMVER_REGEX.test(name.replace(/^v/, ''))
 }
 
 function validateAreaFileNames(list, fail, area, unnamed) {
@@ -219,7 +218,7 @@ function validateAreaFileNames(list, fail, area, unnamed) {
       fail(`areaFiles to "${rule.to}" in area "${area}" must be a single file name at the top of the Area`)
     }
     if (GLOB_CHARS.test(rule.from)) fail(`areaFiles from "${rule.from}" in area "${area}" must be one file, not a glob`)
-    if (SHARED_FILE_NAMES.has(rule.to)) fail(`areaFiles to "${rule.to}" in area "${area}" is one of the publisher's shared files`)
+    if (GENERATED_AREA_NAMES.has(rule.to)) fail(`areaFiles to "${rule.to}" in area "${area}" is one of the publisher's shared files`)
     if (unnamed && rule.to === 'latest') fail(`areaFiles to "${rule.to}" in area "${area}" is the Latest folder the publisher writes`)
   }
 }
@@ -389,7 +388,7 @@ export function readEntries(file, sourceBranch) {
 // The tag name release-please uses for a package folder: its `component`,
 // else its `package-name`, else the folder name. Keys under the config's
 // `packages` are `<packages>/<folder>`, or `<folder>` when `packages` is the repo root.
-// Returns null when there is no config file, so callers fall back to the folder name.
+// Returns null when there is no config file, so a tag name stands for the package folder name.
 export function readTagNames(source, entry) {
   if (!entry.tagNames) return null
   const file = entry.tagNames
@@ -444,19 +443,3 @@ function rejectDuplicateTagNames(map, prefix, file) {
   return map
 }
 
-export function folderForTagName(map, tagName) {
-  if (!map) return tagName
-  for (const [folder, tag] of map) {
-    if (tag !== tagName) continue
-    if (isReservedName(folder)) {
-      throw new FatalError(`tag component "${tagName}" resolves to "${folder}", a name the publisher reserves`)
-    }
-    return folder
-  }
-  return tagName
-}
-
-export function tagForVersionFolder(map, name, version) {
-  if (!name) return version
-  return `${map?.get(name) ?? name}-v${version}`
-}

@@ -1076,14 +1076,14 @@ var require_util = __commonJS({
         }
         const port = url.port != null ? url.port : url.protocol === "https:" ? 443 : 80;
         let origin = url.origin != null ? url.origin : `${url.protocol || ""}//${url.hostname || ""}:${port}`;
-        let path11 = url.path != null ? url.path : `${url.pathname || ""}${url.search || ""}`;
+        let path14 = url.path != null ? url.path : `${url.pathname || ""}${url.search || ""}`;
         if (origin[origin.length - 1] === "/") {
           origin = origin.slice(0, origin.length - 1);
         }
-        if (path11 && path11[0] !== "/") {
-          path11 = `/${path11}`;
+        if (path14 && path14[0] !== "/") {
+          path14 = `/${path14}`;
         }
-        return new URL(`${origin}${path11}`);
+        return new URL(`${origin}${path14}`);
       }
       if (!isHttpOrHttpsPrefixed(url.origin || url.protocol)) {
         throw new InvalidArgumentError("Invalid URL protocol: the URL must start with `http:` or `https:`.");
@@ -1534,39 +1534,39 @@ var require_diagnostics = __commonJS({
       });
       diagnosticsChannel.channel("undici:client:sendHeaders").subscribe((evt) => {
         const {
-          request: { method, path: path11, origin }
+          request: { method, path: path14, origin }
         } = evt;
-        debuglog("sending request to %s %s/%s", method, origin, path11);
+        debuglog("sending request to %s %s/%s", method, origin, path14);
       });
       diagnosticsChannel.channel("undici:request:headers").subscribe((evt) => {
         const {
-          request: { method, path: path11, origin },
+          request: { method, path: path14, origin },
           response: { statusCode }
         } = evt;
         debuglog(
           "received response to %s %s/%s - HTTP %d",
           method,
           origin,
-          path11,
+          path14,
           statusCode
         );
       });
       diagnosticsChannel.channel("undici:request:trailers").subscribe((evt) => {
         const {
-          request: { method, path: path11, origin }
+          request: { method, path: path14, origin }
         } = evt;
-        debuglog("trailers received from %s %s/%s", method, origin, path11);
+        debuglog("trailers received from %s %s/%s", method, origin, path14);
       });
       diagnosticsChannel.channel("undici:request:error").subscribe((evt) => {
         const {
-          request: { method, path: path11, origin },
+          request: { method, path: path14, origin },
           error: error2
         } = evt;
         debuglog(
           "request to %s %s/%s errored - %s",
           method,
           origin,
-          path11,
+          path14,
           error2.message
         );
       });
@@ -1615,9 +1615,9 @@ var require_diagnostics = __commonJS({
         });
         diagnosticsChannel.channel("undici:client:sendHeaders").subscribe((evt) => {
           const {
-            request: { method, path: path11, origin }
+            request: { method, path: path14, origin }
           } = evt;
-          debuglog("sending request to %s %s/%s", method, origin, path11);
+          debuglog("sending request to %s %s/%s", method, origin, path14);
         });
       }
       diagnosticsChannel.channel("undici:websocket:open").subscribe((evt) => {
@@ -1680,7 +1680,7 @@ var require_request = __commonJS({
     var kHandler = /* @__PURE__ */ Symbol("handler");
     var Request = class {
       constructor(origin, {
-        path: path11,
+        path: path14,
         method,
         body,
         headers,
@@ -1695,11 +1695,11 @@ var require_request = __commonJS({
         expectContinue,
         servername
       }, handler2) {
-        if (typeof path11 !== "string") {
+        if (typeof path14 !== "string") {
           throw new InvalidArgumentError("path must be a string");
-        } else if (path11[0] !== "/" && !(path11.startsWith("http://") || path11.startsWith("https://")) && method !== "CONNECT") {
+        } else if (path14[0] !== "/" && !(path14.startsWith("http://") || path14.startsWith("https://")) && method !== "CONNECT") {
           throw new InvalidArgumentError("path must be an absolute URL or start with a slash");
-        } else if (invalidPathRegex.test(path11)) {
+        } else if (invalidPathRegex.test(path14)) {
           throw new InvalidArgumentError("invalid request path");
         }
         if (typeof method !== "string") {
@@ -1765,7 +1765,7 @@ var require_request = __commonJS({
         this.completed = false;
         this.aborted = false;
         this.upgrade = upgrade || null;
-        this.path = query ? buildURL(path11, query) : path11;
+        this.path = query ? buildURL(path14, query) : path14;
         this.origin = origin;
         this.idempotent = idempotent == null ? method === "HEAD" || method === "GET" : idempotent;
         this.blocking = blocking == null ? false : blocking;
@@ -6458,7 +6458,7 @@ var require_client_h1 = __commonJS({
       return method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && method !== "TRACE" && method !== "CONNECT";
     }
     function writeH1(client, request2) {
-      const { method, path: path11, host, upgrade, blocking, reset } = request2;
+      const { method, path: path14, host, upgrade, blocking, reset } = request2;
       let { body, headers, contentLength } = request2;
       const expectsPayload = method === "PUT" || method === "POST" || method === "PATCH" || method === "QUERY" || method === "PROPFIND" || method === "PROPPATCH";
       if (util.isFormDataLike(body)) {
@@ -6539,7 +6539,7 @@ var require_client_h1 = __commonJS({
       if (blocking) {
         socket[kBlocking] = true;
       }
-      let header = `${method} ${path11} HTTP/1.1\r
+      let header = `${method} ${path14} HTTP/1.1\r
 `;
       if (typeof host === "string") {
         header += `host: ${host}\r
@@ -7068,7 +7068,7 @@ var require_client_h2 = __commonJS({
     }
     function writeH2(client, request2) {
       const session = client[kHTTP2Session];
-      const { method, path: path11, host, upgrade, expectContinue, signal, headers: reqHeaders } = request2;
+      const { method, path: path14, host, upgrade, expectContinue, signal, headers: reqHeaders } = request2;
       let { body } = request2;
       if (upgrade) {
         util.errorRequest(client, request2, new Error("Upgrade not supported for H2"));
@@ -7165,7 +7165,7 @@ var require_client_h2 = __commonJS({
         });
         return true;
       }
-      headers[HTTP2_HEADER_PATH] = path11;
+      headers[HTTP2_HEADER_PATH] = path14;
       headers[HTTP2_HEADER_SCHEME] = "https";
       const expectsPayload = method === "PUT" || method === "POST" || method === "PATCH";
       if (body && typeof body.read === "function") {
@@ -7518,9 +7518,9 @@ var require_redirect_handler = __commonJS({
           return this.handler.onHeaders(statusCode, headers, resume, statusText);
         }
         const { origin, pathname, search } = util.parseURL(new URL(this.location, this.opts.origin && new URL(this.opts.path, this.opts.origin)));
-        const path11 = search ? `${pathname}${search}` : pathname;
+        const path14 = search ? `${pathname}${search}` : pathname;
         this.opts.headers = cleanRequestHeaders(this.opts.headers, statusCode === 303, this.opts.origin !== origin);
-        this.opts.path = path11;
+        this.opts.path = path14;
         this.opts.origin = origin;
         this.opts.maxRedirections = 0;
         this.opts.query = null;
@@ -8759,10 +8759,10 @@ var require_proxy_agent = __commonJS({
         };
         const {
           origin,
-          path: path11 = "/",
+          path: path14 = "/",
           headers = {}
         } = opts;
-        opts.path = origin + path11;
+        opts.path = origin + path14;
         if (!("host" in headers) && !("Host" in headers)) {
           const { host } = new URL2(origin);
           headers.host = host;
@@ -10734,20 +10734,20 @@ var require_mock_utils = __commonJS({
       }
       return true;
     }
-    function safeUrl(path11) {
-      if (typeof path11 !== "string") {
-        return path11;
+    function safeUrl(path14) {
+      if (typeof path14 !== "string") {
+        return path14;
       }
-      const pathSegments = path11.split("?");
+      const pathSegments = path14.split("?");
       if (pathSegments.length !== 2) {
-        return path11;
+        return path14;
       }
       const qp = new URLSearchParams(pathSegments.pop());
       qp.sort();
       return [...pathSegments, qp.toString()].join("?");
     }
-    function matchKey(mockDispatch2, { path: path11, method, body, headers }) {
-      const pathMatch = matchValue(mockDispatch2.path, path11);
+    function matchKey(mockDispatch2, { path: path14, method, body, headers }) {
+      const pathMatch = matchValue(mockDispatch2.path, path14);
       const methodMatch = matchValue(mockDispatch2.method, method);
       const bodyMatch = typeof mockDispatch2.body !== "undefined" ? matchValue(mockDispatch2.body, body) : true;
       const headersMatch = matchHeaders(mockDispatch2, headers);
@@ -10769,7 +10769,7 @@ var require_mock_utils = __commonJS({
     function getMockDispatch(mockDispatches, key) {
       const basePath = key.query ? buildURL(key.path, key.query) : key.path;
       const resolvedPath = typeof basePath === "string" ? safeUrl(basePath) : basePath;
-      let matchedMockDispatches = mockDispatches.filter(({ consumed }) => !consumed).filter(({ path: path11 }) => matchValue(safeUrl(path11), resolvedPath));
+      let matchedMockDispatches = mockDispatches.filter(({ consumed }) => !consumed).filter(({ path: path14 }) => matchValue(safeUrl(path14), resolvedPath));
       if (matchedMockDispatches.length === 0) {
         throw new MockNotMatchedError(`Mock dispatch not matched for path '${resolvedPath}'`);
       }
@@ -10807,9 +10807,9 @@ var require_mock_utils = __commonJS({
       }
     }
     function buildKey(opts) {
-      const { path: path11, method, body, headers, query } = opts;
+      const { path: path14, method, body, headers, query } = opts;
       return {
-        path: path11,
+        path: path14,
         method,
         body,
         headers,
@@ -11272,10 +11272,10 @@ var require_pending_interceptors_formatter = __commonJS({
       }
       format(pendingInterceptors) {
         const withPrettyHeaders = pendingInterceptors.map(
-          ({ method, path: path11, data: { statusCode }, persist, times, timesInvoked, origin }) => ({
+          ({ method, path: path14, data: { statusCode }, persist, times, timesInvoked, origin }) => ({
             Method: method,
             Origin: origin,
-            Path: path11,
+            Path: path14,
             "Status code": statusCode,
             Persistent: persist ? PERSISTENT : NOT_PERSISTENT,
             Invocations: timesInvoked,
@@ -16154,9 +16154,9 @@ var require_util6 = __commonJS({
         }
       }
     }
-    function validateCookiePath(path11) {
-      for (let i = 0; i < path11.length; ++i) {
-        const code = path11.charCodeAt(i);
+    function validateCookiePath(path14) {
+      for (let i = 0; i < path14.length; ++i) {
+        const code = path14.charCodeAt(i);
         if (code < 32 || // exclude CTLs (0-31)
         code > 126 || // exclude DEL and non-ascii
         code === 59) {
@@ -19076,11 +19076,11 @@ var require_undici = __commonJS({
           if (typeof opts.path !== "string") {
             throw new InvalidArgumentError("invalid opts.path");
           }
-          let path11 = opts.path;
+          let path14 = opts.path;
           if (!opts.path.startsWith("/")) {
-            path11 = `/${path11}`;
+            path14 = `/${path14}`;
           }
-          url = new URL(util.parseOrigin(url).origin + path11);
+          url = new URL(util.parseOrigin(url).origin + path14);
         } else {
           if (!opts) {
             opts = typeof url === "object" ? url : {};
@@ -20000,17 +20000,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path11) {
-      const ctrl = callVisitor(key, node, visitor, path11);
+    function visit_(key, node, visitor, path14) {
+      const ctrl = callVisitor(key, node, visitor, path14);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path11, ctrl);
-        return visit_(key, ctrl, visitor, path11);
+        replaceNode(key, path14, ctrl);
+        return visit_(key, ctrl, visitor, path14);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path11 = Object.freeze(path11.concat(node));
+          path14 = Object.freeze(path14.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = visit_(i, node.items[i], visitor, path11);
+            const ci = visit_(i, node.items[i], visitor, path14);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -20021,13 +20021,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path11 = Object.freeze(path11.concat(node));
-          const ck = visit_("key", node.key, visitor, path11);
+          path14 = Object.freeze(path14.concat(node));
+          const ck = visit_("key", node.key, visitor, path14);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path11);
+          const cv = visit_("value", node.value, visitor, path14);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -20048,17 +20048,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path11) {
-      const ctrl = await callVisitor(key, node, visitor, path11);
+    async function visitAsync_(key, node, visitor, path14) {
+      const ctrl = await callVisitor(key, node, visitor, path14);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path11, ctrl);
-        return visitAsync_(key, ctrl, visitor, path11);
+        replaceNode(key, path14, ctrl);
+        return visitAsync_(key, ctrl, visitor, path14);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path11 = Object.freeze(path11.concat(node));
+          path14 = Object.freeze(path14.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = await visitAsync_(i, node.items[i], visitor, path11);
+            const ci = await visitAsync_(i, node.items[i], visitor, path14);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -20069,13 +20069,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path11 = Object.freeze(path11.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path11);
+          path14 = Object.freeze(path14.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path14);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path11);
+          const cv = await visitAsync_("value", node.value, visitor, path14);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -20102,23 +20102,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path11) {
+    function callVisitor(key, node, visitor, path14) {
       if (typeof visitor === "function")
-        return visitor(key, node, path11);
+        return visitor(key, node, path14);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path11);
+        return visitor.Map?.(key, node, path14);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path11);
+        return visitor.Seq?.(key, node, path14);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path11);
+        return visitor.Pair?.(key, node, path14);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path11);
+        return visitor.Scalar?.(key, node, path14);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path11);
+        return visitor.Alias?.(key, node, path14);
       return void 0;
     }
-    function replaceNode(key, path11, node) {
-      const parent = path11[path11.length - 1];
+    function replaceNode(key, path14, node) {
+      const parent = path14[path14.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -20730,10 +20730,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path11, value) {
+    function collectionFromPath(schema, path14, value) {
       let v = value;
-      for (let i = path11.length - 1; i >= 0; --i) {
-        const k = path11[i];
+      for (let i = path14.length - 1; i >= 0; --i) {
+        const k = path14[i];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a = [];
           a[k] = v;
@@ -20752,7 +20752,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path11) => path11 == null || typeof path11 === "object" && !!path11[Symbol.iterator]().next().done;
+    var isEmptyPath = (path14) => path14 == null || typeof path14 === "object" && !!path14[Symbol.iterator]().next().done;
     var Collection2 = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -20782,11 +20782,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path11, value) {
-        if (isEmptyPath(path11))
+      addIn(path14, value) {
+        if (isEmptyPath(path14))
           this.add(value);
         else {
-          const [key, ...rest] = path11;
+          const [key, ...rest] = path14;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -20800,8 +20800,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path11) {
-        const [key, ...rest] = path11;
+      deleteIn(path14) {
+        const [key, ...rest] = path14;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -20815,8 +20815,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path11, keepScalar) {
-        const [key, ...rest] = path11;
+      getIn(path14, keepScalar) {
+        const [key, ...rest] = path14;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -20834,8 +20834,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path11) {
-        const [key, ...rest] = path11;
+      hasIn(path14) {
+        const [key, ...rest] = path14;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -20845,8 +20845,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path11, value) {
-        const [key, ...rest] = path11;
+      setIn(path14, value) {
+        const [key, ...rest] = path14;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -23361,9 +23361,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path11, value) {
+      addIn(path14, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path11, value);
+          this.contents.addIn(path14, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -23438,14 +23438,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path11) {
-        if (Collection2.isEmptyPath(path11)) {
+      deleteIn(path14) {
+        if (Collection2.isEmptyPath(path14)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path11) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path14) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -23460,10 +23460,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path11, keepScalar) {
-        if (Collection2.isEmptyPath(path11))
+      getIn(path14, keepScalar) {
+        if (Collection2.isEmptyPath(path14))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path11, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path14, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -23474,10 +23474,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path11) {
-        if (Collection2.isEmptyPath(path11))
+      hasIn(path14) {
+        if (Collection2.isEmptyPath(path14))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path11) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path14) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -23494,13 +23494,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path11, value) {
-        if (Collection2.isEmptyPath(path11)) {
+      setIn(path14, value) {
+        if (Collection2.isEmptyPath(path14)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection2.collectionFromPath(this.schema, Array.from(path11), value);
+          this.contents = Collection2.collectionFromPath(this.schema, Array.from(path14), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path11, value);
+          this.contents.setIn(path14, value);
         }
       }
       /**
@@ -25461,9 +25461,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path11) => {
+    visit.itemAtPath = (cst, path14) => {
       let item = cst;
-      for (const [field, index] of path11) {
+      for (const [field, index] of path14) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -25472,23 +25472,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path11) => {
-      const parent = visit.itemAtPath(cst, path11.slice(0, -1));
-      const field = path11[path11.length - 1][0];
+    visit.parentCollection = (cst, path14) => {
+      const parent = visit.itemAtPath(cst, path14.slice(0, -1));
+      const field = path14[path14.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path11, item, visitor) {
-      let ctrl = visitor(item, path11);
+    function _visit(path14, item, visitor) {
+      let ctrl = visitor(item, path14);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path11.concat([[field, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path14.concat([[field, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -25499,10 +25499,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path11);
+            ctrl = ctrl(item, path14);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path11) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path14) : ctrl;
     }
     exports.visit = visit;
   }
@@ -26804,14 +26804,14 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs11 = this.flowScalar(this.type);
+              const fs12 = this.flowScalar(this.type);
               if (atNextItem || it.value) {
-                map.items.push({ start, key: fs11, sep: [] });
+                map.items.push({ start, key: fs12, sep: [] });
                 this.onKeyLine = true;
               } else if (it.sep) {
-                this.stack.push(fs11);
+                this.stack.push(fs12);
               } else {
-                Object.assign(it, { key: fs11, sep: [] });
+                Object.assign(it, { key: fs12, sep: [] });
                 this.onKeyLine = true;
               }
               return;
@@ -26939,13 +26939,13 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs11 = this.flowScalar(this.type);
+              const fs12 = this.flowScalar(this.type);
               if (!it || it.value)
-                fc.items.push({ start: [], key: fs11, sep: [] });
+                fc.items.push({ start: [], key: fs12, sep: [] });
               else if (it.sep)
-                this.stack.push(fs11);
+                this.stack.push(fs12);
               else
-                Object.assign(it, { key: fs11, sep: [] });
+                Object.assign(it, { key: fs12, sep: [] });
               return;
             }
             case "flow-map-end":
@@ -27764,8 +27764,8 @@ var Context = class {
       if (existsSync2(process.env.GITHUB_EVENT_PATH)) {
         this.payload = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, { encoding: "utf8" }));
       } else {
-        const path11 = process.env.GITHUB_EVENT_PATH;
-        process.stdout.write(`GITHUB_EVENT_PATH ${path11} does not exist${EOL5}`);
+        const path14 = process.env.GITHUB_EVENT_PATH;
+        process.stdout.write(`GITHUB_EVENT_PATH ${path14} does not exist${EOL5}`);
       }
     }
     this.eventName = process.env.GITHUB_EVENT_NAME;
@@ -31926,6 +31926,12 @@ var import_yaml = __toESM(require_dist(), 1);
 import fs3 from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
+
+// src/publisher/area-names.mjs
+var SKIPPED_TAGS_FILE = ".skipped-tags.json";
+var GENERATED_AREA_NAMES = /* @__PURE__ */ new Set(["index.json", "versions.json", ".meta.json", SKIPPED_TAGS_FILE]);
+
+// src/publisher/entries.mjs
 function specHash({ collect, build, packages }) {
   const canonical = (value) => {
     if (Array.isArray(value)) return value.map(canonical);
@@ -32078,9 +32084,8 @@ function validatePaths(list2, fail) {
     fail(`paths must be a list of non-empty strings${hint}`);
   }
 }
-var SHARED_FILE_NAMES = /* @__PURE__ */ new Set(["index.json", "versions.json", ".meta.json"]);
 function isReservedName(name) {
-  return SHARED_FILE_NAMES.has(name) || name === "latest" || SEMVER_REGEX.test(name.replace(/^v/, ""));
+  return GENERATED_AREA_NAMES.has(name) || name === "latest" || SEMVER_REGEX.test(name.replace(/^v/, ""));
 }
 function validateAreaFileNames(list2, fail, area, unnamed) {
   for (const rule of list2) {
@@ -32088,7 +32093,7 @@ function validateAreaFileNames(list2, fail, area, unnamed) {
       fail(`areaFiles to "${rule.to}" in area "${area}" must be a single file name at the top of the Area`);
     }
     if (GLOB_CHARS.test(rule.from)) fail(`areaFiles from "${rule.from}" in area "${area}" must be one file, not a glob`);
-    if (SHARED_FILE_NAMES.has(rule.to)) fail(`areaFiles to "${rule.to}" in area "${area}" is one of the publisher's shared files`);
+    if (GENERATED_AREA_NAMES.has(rule.to)) fail(`areaFiles to "${rule.to}" in area "${area}" is one of the publisher's shared files`);
     if (unnamed && rule.to === "latest") fail(`areaFiles to "${rule.to}" in area "${area}" is the Latest folder the publisher writes`);
   }
 }
@@ -32274,21 +32279,6 @@ function rejectDuplicateTagNames(map, prefix, file) {
     );
   }
   return map;
-}
-function folderForTagName(map, tagName) {
-  if (!map) return tagName;
-  for (const [folder, tag] of map) {
-    if (tag !== tagName) continue;
-    if (isReservedName(folder)) {
-      throw new FatalError(`tag component "${tagName}" resolves to "${folder}", a name the publisher reserves`);
-    }
-    return folder;
-  }
-  return tagName;
-}
-function tagForVersionFolder(map, name, version) {
-  if (!name) return version;
-  return `${map?.get(name) ?? name}-v${version}`;
 }
 
 // src/publisher/root.mjs
@@ -32500,7 +32490,10 @@ function groupBy(items, keyFor) {
   }
   return groups;
 }
-function assertCollectable(rel, from, versionDir) {
+function assertCollectable(rel, from, versionDir, areaDir) {
+  if (areaDir !== void 0 && rel === path3.posix.join(areaDir, SKIPPED_TAGS_FILE)) {
+    throw new FatalError(`collect from "${from}" would publish ${rel}: ${SKIPPED_TAGS_FILE} is the publisher's Skipped tags file`);
+  }
   if (path3.posix.basename(rel) === ".meta.json") {
     throw new FatalError(
       `collect from "${from}" would publish ${rel}: .meta.json marks ${versionDir === void 0 ? "an Area" : "a Version folder"}, which the publisher writes`
@@ -32516,7 +32509,6 @@ function folderNames(dir) {
   return fs4.readdirSync(dir).filter((name) => lstatOrNull(path3.join(dir, name))?.isDirectory());
 }
 var metaFile = (fields) => ({ content: JSON.stringify(fields, null, 2) + "\n" });
-var GENERATED_AREA_NAMES = /* @__PURE__ */ new Set(["index.json", "versions.json", ".meta.json"]);
 function generatedAreaNames(entry) {
   return entry.packages === void 0 ? /* @__PURE__ */ new Set([...GENERATED_AREA_NAMES, "latest"]) : GENERATED_AREA_NAMES;
 }
@@ -32590,6 +32582,7 @@ function readMarkerRecord(bytes, marker, root) {
   if (!scope.containsBelow(dir)) invalid(true);
   if ("tag" in metadata) {
     if (!text("tag") || metadata.specHash !== void 0 && (typeof metadata.specHash !== "string" || !/^[a-f0-9]{64}$/.test(metadata.specHash))) invalid();
+    if (metadata.sourceRevision !== void 0 && (typeof metadata.sourceRevision !== "string" || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(metadata.sourceRevision))) invalid();
     let release;
     try {
       release = matchTag(metadata.tag);
@@ -32630,31 +32623,6 @@ function markerRecordAt(docs, root, dir) {
   if (!stat2) return null;
   if (!stat2.isFile()) throw new FatalError(`invalid .meta.json: ${marker}`);
   return readMarkerRecord(fs4.readFileSync(path3.join(docs, marker), "utf8"), marker, root);
-}
-function markerRecords(docs, root, base = root, onInvalid) {
-  const records = [];
-  const walk = (dir) => {
-    for (const name of folderNames(path3.join(docs, dir)).sort()) {
-      if (namesGitPath(name)) continue;
-      const child = path3.posix.join(dir, name);
-      if (lstatOrNull(path3.join(docs, child, ".meta.json"))?.isSymbolicLink()) {
-        walk(child);
-        continue;
-      }
-      let record;
-      try {
-        record = markerRecordAt(docs, root, child);
-      } catch (error2) {
-        if (!(error2 instanceof FatalError) || !onInvalid) throw error2;
-        onInvalid(child, error2);
-        continue;
-      }
-      if (record) records.push(record);
-      if (record?.kind !== "Version") walk(child);
-    }
-  };
-  if (lstatOrNull(path3.join(docs, base))?.isDirectory()) walk(base);
-  return records;
 }
 function assertMarkerOwner(record, area, repository) {
   if (record && record.source !== repository) throw new FatalError(ownershipProblem(area, record.source, repository));
@@ -32767,7 +32735,7 @@ function holdsMarker(docs, dir) {
       if (name === GIT_DIR) continue;
       const child = `${rel}/${name}`;
       const stat2 = lstatOrNull(path3.join(docs, child));
-      if (name === ".meta.json") return true;
+      if (name === ".meta.json" || name === SKIPPED_TAGS_FILE) return true;
       if (stat2?.isDirectory() && walk(child)) return true;
     }
     return false;
@@ -32823,207 +32791,205 @@ function isoDate(date) {
 function commitDate(source, revision) {
   return isoDate(git(source, ["show", "-s", "--format=%cI", revision]));
 }
+function tagCommit(source, tag) {
+  const result = gitStatus(source, ["rev-parse", "--verify", "--quiet", `refs/tags/${tag}^{commit}`]);
+  return result.status === 0 ? result.stdout.trim() : null;
+}
 function tagExists(source, tag) {
-  return gitStatus(source, ["rev-parse", "--verify", "--quiet", `refs/tags/${tag}^{commit}`]).status === 0;
+  return tagCommit(source, tag) !== null;
+}
+function tagRevision(source, tag) {
+  return git(source, ["rev-parse", "--verify", `refs/tags/${tag}^{commit}`]);
 }
 
 // src/publisher/reconcile.mjs
-import fs9 from "node:fs";
-import path9 from "node:path";
+import fs10 from "node:fs";
+import path12 from "node:path";
 
 // src/publisher/shared.mjs
 import fs6 from "node:fs";
+import path6 from "node:path";
+
+// src/publisher/discovery.mjs
 import path5 from "node:path";
 
-// src/publisher/prune.mjs
+// src/publisher/skipped.mjs
 import fs5 from "node:fs";
 import path4 from "node:path";
-function assertInsideRoot(root, rel) {
-  if (!docsRoot(root).containsBelow(rel)) {
-    throw new FatalError(`refusing to delete ${rel}: it is not under the docs root "${root}"`);
-  }
+var REASONS = /* @__PURE__ */ new Set(["retired", "no folder", "prerelease", "content"]);
+var SPEC_SENSITIVE_REASONS = /* @__PURE__ */ new Set(["content", "no folder"]);
+var COMMIT_SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+var SPEC_HASH = /^[a-f0-9]{64}$/;
+function skippedTagsPath(areaDir) {
+  return path4.posix.join(areaDir, SKIPPED_TAGS_FILE);
 }
-var inside = (rel, dir) => rel === dir || rel.startsWith(`${dir}/`);
-function prunedView(removals, { plannedDirs, mirrorAreas }) {
-  const depth = (dir) => dir.split("/").length;
-  const deepest = (dirs) => Math.max(0, ...dirs.map(depth));
-  const kept = [...mirrorAreas].filter((dir) => !plannedDirs.has(dir));
-  return (rel) => {
-    const deletes = removals.filter(({ dir }) => inside(rel, dir)).map(({ dir }) => dir);
-    return deletes.length > 0 && deepest(deletes) >= deepest(kept.filter((dir) => inside(rel, dir)));
+function readSkippedTagsFile(docs, areaDir) {
+  const rel = skippedTagsPath(areaDir);
+  const invalid = () => {
+    throw new FatalError(`invalid ${SKIPPED_TAGS_FILE}: ${rel}`);
   };
+  const stat2 = lstatOrNull(path4.join(docs, rel));
+  if (!stat2) return null;
+  if (!stat2.isFile()) invalid();
+  let data;
+  try {
+    data = JSON.parse(fs5.readFileSync(path4.join(docs, rel), "utf8"));
+  } catch {
+    invalid();
+  }
+  if (data === null || typeof data !== "object" || Array.isArray(data)) invalid();
+  if (typeof data.source !== "string" || data.source === "") invalid();
+  if (data.tags === null || typeof data.tags !== "object" || Array.isArray(data.tags)) invalid();
+  const records = /* @__PURE__ */ new Map();
+  for (const [tag, record] of Object.entries(data.tags)) {
+    if (tag === "" || record === null || typeof record !== "object" || Array.isArray(record)) invalid();
+    if (typeof record.sourceRevision !== "string" || !COMMIT_SHA.test(record.sourceRevision)) invalid();
+    if (!REASONS.has(record.reason)) invalid();
+    if (SPEC_SENSITIVE_REASONS.has(record.reason) && record.specHash === void 0) invalid();
+    if (record.specHash !== void 0 && (typeof record.specHash !== "string" || !SPEC_HASH.test(record.specHash))) {
+      invalid();
+    }
+    if (record.detail !== void 0 && (typeof record.detail !== "string" || record.detail === "")) invalid();
+    records.set(tag, record);
+  }
+  return { source: data.source, tags: records };
 }
-function scan(docs, root) {
-  const invalid = [];
-  const records = markerRecords(docs, root, root, (dir, error2) => {
-    if (error2.outsideRoot || !SEMVER_REGEX.test(path4.posix.basename(dir).replace(/^v/, ""))) throw error2;
-    invalid.push({ dir, message: error2.message });
+function readSkippedTags(docs, areaDir) {
+  return readSkippedTagsFile(docs, areaDir)?.tags ?? null;
+}
+function skippedRecordAt(docs, areaDir) {
+  const file = readSkippedTagsFile(docs, areaDir);
+  return file === null ? null : { kind: "Skipped", source: file.source, dir: areaDir, areaDir, rel: skippedTagsPath(areaDir) };
+}
+function skippedTagsFile({ source, tags }) {
+  const sorted = [...tags].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
+  return metaFile({ source, tags: Object.fromEntries(sorted) });
+}
+var byTag = (left, right) => left.tag < right.tag ? -1 : left.tag > right.tag ? 1 : 0;
+function skippedTagsChange({ rel, existed, tags, repository }) {
+  if (tags.size > 0) return { rel, file: skippedTagsFile({ source: repository, tags }) };
+  return existed ? { rel, remove: true } : null;
+}
+function skipRecord(pkg, spec) {
+  const record = { sourceRevision: pkg.sourceRevision, reason: pkg.note };
+  if (SPEC_SENSITIVE_REASONS.has(pkg.note)) record.specHash = spec;
+  if (pkg.note === "content" && pkg.reason !== void 0) record.detail = pkg.reason;
+  return record;
+}
+function skipOutcome(areaDir, pkg, reused) {
+  return { areaDir, tag: pkg.tag, skip: pkg.note, detail: pkg.note === "content" ? pkg.reason : void 0, reused };
+}
+function planAreaSkips({ docs, areaDir, entry, repository }) {
+  const records = readSkippedTags(docs, areaDir);
+  const spec = specHash(entry);
+  const skipped = /* @__PURE__ */ new Map();
+  const keep = (pkg, reused) => skipped.set(pkg.tag, {
+    outcome: skipOutcome(areaDir, pkg, reused),
+    record: pkg.note === "missing tag" || pkg.sourceRevision === void 0 ? null : skipRecord(pkg, spec)
   });
+  const outcomes = () => [...skipped.values()].map(({ outcome }) => outcome).sort(byTag);
   return {
-    records,
-    invalid,
-    mirrors: records.filter((record) => record.kind === "Mirror"),
-    branches: records.filter((record) => record.kind === "Branch"),
-    versions: records.filter((record) => record.kind === "Version")
-  };
-}
-function packageFolderGone(source, entry, name, checked) {
-  if (!checked.has(entry)) {
-    if (!hasTreeAt(source, "HEAD", entry.packages)) {
-      throw new FatalError(
-        `Area "${entry.area}": the packages folder "${entry.packages}" is not in the source checkout, so no package can be told apart from a removed one. To retire the whole Area, remove its entry from docs_publisher.yaml.`
-      );
-    }
-    checked.add(entry);
-  }
-  return !hasTreeAt(source, "HEAD", path4.posix.join(entry.packages, name));
-}
-function missingVersionChildren(docs, dir, plannedDirs) {
-  const problems = [];
-  for (const name of folderNames(path4.join(docs, dir))) {
-    const child = `${dir}/${name}`;
-    if (plannedDirs.has(child) || !SEMVER_REGEX.test(name.replace(/^v/, ""))) continue;
-    const marker = `${child}/.meta.json`;
-    if (!lstatOrNull(path4.join(docs, marker))) problems.push(`Version folder ${child} has no .meta.json`);
-  }
-  return problems;
-}
-function planPrune({ docs, source, root, repository, entries }) {
-  const { records, invalid, mirrors, branches, versions } = scan(docs, root);
-  const ownedDirs = new Set(records.filter((record) => record.source === repository).map((record) => record.dir));
-  const mirrorAreas = new Map(entries.filter((entry) => entry.mode === "mirror").map((entry) => [path4.posix.join(root, entry.area), entry]));
-  const releaseAreas = new Map(entries.filter((entry) => entry.mode === "release").map((entry) => [path4.posix.join(root, entry.area), entry]));
-  const removals = [];
-  const files = [];
-  const problems = [];
-  const warnings = [];
-  const checked = /* @__PURE__ */ new Set();
-  const removedVersions = /* @__PURE__ */ new Set();
-  const areaRemoval = (areaDir, mode) => {
-    const other = mode === "mirror" ? releaseAreas : mirrorAreas;
-    return other.has(areaDir) ? { kind: "mode-change", reason: `its entry is now in ${mode === "mirror" ? "release" : "mirror"} mode` } : { kind: "area-gone", reason: "its entry is gone from docs_publisher.yaml" };
-  };
-  const retiredAreas = /* @__PURE__ */ new Set();
-  const retireTopFiles = (areaDir) => {
-    retiredAreas.add(areaDir);
-    for (const child of fs5.readdirSync(path4.join(docs, areaDir), { withFileTypes: true })) {
-      if (child.isFile()) files.push({ rel: `${areaDir}/${child.name}`, areaDir });
-    }
-  };
-  for (const mirror of mirrors) {
-    if (!ownedDirs.has(mirror.dir)) continue;
-    if (!mirrorAreas.has(mirror.dir)) removals.push({ dir: mirror.dir, areaDir: mirror.areaDir, ...areaRemoval(mirror.dir, "mirror") });
-  }
-  const byArea = groupBy(versions, (version) => version.areaDir);
-  for (const [areaDir, inArea] of [...byArea].sort(([a], [b]) => a.localeCompare(b))) {
-    if (!inArea.some((version) => ownedDirs.has(version.dir))) continue;
-    const entry = releaseAreas.get(areaDir);
-    const retire = (group) => {
-      for (const version of group) {
-        removedVersions.add(version.dir);
-        if (!tagExists(source, version.tag)) warnings.push({
-          dir: version.dir,
-          message: `Warning: pruned \`${version.dir}\` has no tag \`${version.tag}\` in the source repo, so only the docs repo's git history can restore it.`
-        });
+    reuse(pending) {
+      if (!records) return;
+      for (const { pkg } of pending) {
+        const record = records.get(pkg.tag);
+        if (!record) continue;
+        if (record.sourceRevision !== pkg.sourceRevision) continue;
+        if (record.reason !== (pkg.note ?? "content")) continue;
+        if (SPEC_SENSITIVE_REASONS.has(record.reason) && record.specHash !== spec) continue;
+        if (record.reason === "content" && !pkg.note) pkg.reason = record.detail;
+        pkg.note = record.reason;
+        keep(pkg, true);
       }
-    };
-    if (!entry) {
-      retire(inArea);
-      const removal = areaRemoval(areaDir, "release");
-      const named = inArea.some((version) => version.packageDir);
-      const dirs = named ? [...new Set(inArea.map((version) => version.packageDir).filter(Boolean))] : [...inArea.map((version) => version.dir), `${areaDir}/latest`];
-      for (const dir of dirs) removals.push({ dir, areaDir, ...removal });
-      retireTopFiles(areaDir);
-      continue;
+    },
+    record(pkg) {
+      if (skipped.has(pkg.tag)) return;
+      if (!pkg.note) return;
+      keep(pkg, false);
+    },
+    outcomes,
+    change() {
+      const tags = /* @__PURE__ */ new Map();
+      for (const [tag, skip] of skipped) if (skip.record !== null) tags.set(tag, skip.record);
+      return skippedTagsChange({ rel: skippedTagsPath(areaDir), existed: records !== null, tags, repository });
     }
-    if (entry.packages === void 0) continue;
-    const byPackage = groupBy(inArea.filter((version) => version.packageDir), (version) => version.packageDir);
-    for (const [packageDir, group] of byPackage) {
-      if (!packageFolderGone(source, entry, path4.posix.basename(packageDir), checked)) continue;
-      retire(group);
-      removals.push({ dir: packageDir, areaDir, kind: "package-gone", reason: `\`${entry.packages}/${path4.posix.basename(packageDir)}\` is gone from the source repo` });
-    }
-  }
-  for (const branch of branches) {
-    if (!ownedDirs.has(branch.dir)) continue;
-    const { areaDir, name } = branch;
-    const entry = releaseAreas.get(areaDir);
-    if (entry?.publishSourceBranch !== true) {
-      removals.push({ dir: branch.dir, areaDir, ...entry ? { kind: "branch-off", reason: "its entry no longer publishes the source branch" } : areaRemoval(areaDir, "release") });
-      if (!entry && !retiredAreas.has(areaDir)) retireTopFiles(areaDir);
-      continue;
-    }
-    if (name !== null && entry.packages !== void 0 && packageFolderGone(source, entry, name, checked)) {
-      removals.push({ dir: branch.dir, areaDir, kind: "package-gone", reason: `\`${entry.packages}/${name}\` is gone from the source repo` });
-    }
-  }
-  const plannedDirs = /* @__PURE__ */ new Set([...removals.map((removal) => removal.dir), ...removedVersions]);
-  const isPruned = prunedView(removals, { plannedDirs, mirrorAreas: mirrors.map((mirror) => mirror.areaDir) });
-  const affectedAreas = [
-    ...[...removals, ...files].map((change) => change.areaDir),
-    ...records.filter((record) => isPruned(record.areaDir)).map((record) => record.areaDir)
-  ];
-  assertRecordOwners(records, affectedAreas, root, repository);
-  for (const damaged of invalid) {
-    if (isPruned(damaged.dir)) problems.push(damaged.message);
-  }
-  for (const { dir } of removals) problems.push(...missingVersionChildren(docs, dir, plannedDirs));
-  if (problems.length > 0) throw new FatalError([...new Set(problems)].join("\n"));
-  for (const { dir } of removals) assertInsideRoot(root, dir);
-  for (const { rel } of files) assertInsideRoot(root, rel);
-  for (const { dir } of removals) assertNoSymlinkTree(docs, dir);
-  return {
-    removals,
-    files,
-    warnings,
-    plannedDirs,
-    isPruned,
-    hasWork: removals.length > 0 || files.length > 0
   };
 }
-function applyPrune(docs, plan, root) {
-  const scope = docsRoot(root);
-  const paths = [];
-  for (const { dir } of plan.removals) {
-    assertInsideRoot(root, dir);
-    assertNoSymlinkPath(docs, dir);
-    if (!lstatOrNull(path4.join(docs, dir))?.isDirectory()) continue;
-    clearArea(docs, dir, plan.plannedDirs);
-    if (fs5.readdirSync(path4.join(docs, dir)).length === 0) fs5.rmdirSync(path4.join(docs, dir));
-    paths.push(dir);
-  }
-  for (const { rel } of plan.files) {
-    assertInsideRoot(root, rel);
-    assertNoSymlinkPath(docs, rel);
-    fs5.rmSync(path4.join(docs, rel), { force: true });
-    paths.push(rel);
-  }
-  for (const rel of paths) {
-    for (let dir = path4.posix.dirname(rel); scope.containsBelow(dir); dir = path4.posix.dirname(dir)) {
-      if (!lstatOrNull(path4.join(docs, dir))?.isDirectory() || fs5.readdirSync(path4.join(docs, dir)).length > 0) break;
-      fs5.rmdirSync(path4.join(docs, dir));
+function planTagClear({ docs, areaDir, tag, repository }) {
+  const records = readSkippedTags(docs, areaDir);
+  if (!records?.has(tag)) return null;
+  records.delete(tag);
+  return skippedTagsChange({ rel: skippedTagsPath(areaDir), existed: true, tags: records, repository });
+}
+function applySkippedTagsChange(docs, change) {
+  if (change.remove) fs5.rmSync(path4.join(docs, change.rel), { force: true });
+  else writeFile2(docs, change.rel, change.file);
+}
+
+// src/publisher/discovery.mjs
+function walkMarkers(docs, root, base, claim, damaged) {
+  const walk = (dir) => {
+    for (const name of folderNames(path5.join(docs, dir)).sort()) {
+      if (namesGitPath(name)) continue;
+      const child = path5.posix.join(dir, name);
+      if (lstatOrNull(path5.join(docs, child, ".meta.json"))?.isSymbolicLink()) {
+        walk(child);
+        continue;
+      }
+      let record;
+      try {
+        record = markerRecordAt(docs, root, child);
+      } catch (error2) {
+        if (!(error2 instanceof FatalError) || !damaged) throw error2;
+        damaged(child, error2);
+        continue;
+      }
+      claim(child, record);
+      if (record?.kind !== "Version") walk(child);
     }
-  }
-  return paths;
+  };
+  if (lstatOrNull(path5.join(docs, base))?.isDirectory()) walk(base);
 }
-var NO_PRUNE = {
-  removals: [],
-  files: [],
-  warnings: [],
-  plannedDirs: /* @__PURE__ */ new Set(),
-  isPruned: () => false,
-  hasWork: false
-};
-function stalePruneSummary(sourceBranch) {
-  writeSummary(`Skipped prune: the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell which docs are stale.`);
+function markerRecords(docs, root, base, damaged) {
+  const records = [];
+  walkMarkers(docs, root, base, (_dir, record) => {
+    if (record) records.push(record);
+  }, damaged);
+  return records;
 }
-function pruneSummary(plan, branch, changed) {
-  if (plan.removals.length === 0 && plan.files.length === 0) return;
-  for (const { message } of plan.warnings) writeSummary(message);
-  const reasons = groupBy(plan.removals, (removal) => removal.reason);
-  writeSummary(changed ? `Pruned from \`${branch}\`:` : "Nothing to prune: the docs repo already matches.");
-  if (!changed) return;
-  for (const [reason, removals] of reasons) writeSummary(`- Pruned ${removals.map(({ dir }) => `\`${dir}\``).join(", ")}: ${reason}.`);
+function discoverAreas(docs, root) {
+  const markers = [];
+  const skipped = [];
+  const markerDamage = [];
+  const skippedDamage = [];
+  walkMarkers(docs, root, root, (dir, record) => {
+    if (record) markers.push(record);
+    if (record?.kind === "Version") return;
+    try {
+      const claim = skippedRecordAt(docs, dir);
+      if (claim) skipped.push(claim);
+    } catch (error2) {
+      if (!(error2 instanceof FatalError)) throw error2;
+      skippedDamage.push({ dir, rel: skippedTagsPath(dir), message: error2.message });
+    }
+  }, (dir, error2) => {
+    if (error2.outsideRoot || !SEMVER_REGEX.test(path5.posix.basename(dir).replace(/^v/, ""))) throw error2;
+    markerDamage.push({ dir, message: error2.message });
+  });
+  const claims = [...markers, ...skipped];
+  return {
+    claims,
+    damaged: [...markerDamage, ...skippedDamage],
+    releaseAreas: ({ content = /* @__PURE__ */ new Set() } = {}) => {
+      const dirs = /* @__PURE__ */ new Set();
+      for (const claim of claims) {
+        if (claim.kind === "Mirror") continue;
+        if (claim.kind === "Skipped" && content.has(claim.rel)) continue;
+        dirs.add(claim.areaDir);
+      }
+      return dirs;
+    }
+  };
 }
 
 // src/publisher/shared.mjs
@@ -33071,14 +33037,14 @@ function nestedAreaProblem(docs, root, { dir, refused, refuser, areaDir, overlap
 function versionFiles(docs, root, dir, areaDir, problems) {
   const files = /* @__PURE__ */ new Map();
   const walk = (rel) => {
-    for (const name of fs6.readdirSync(path5.join(docs, dir, rel)).sort()) {
+    for (const name of fs6.readdirSync(path6.join(docs, dir, rel)).sort()) {
       if (!rel && name === ".meta.json") continue;
-      const child = path5.posix.join(rel, name);
-      const abs = path5.join(docs, dir, child);
+      const child = path6.posix.join(rel, name);
+      const abs = path6.join(docs, dir, child);
       const stat2 = lstatOrNull(abs);
       if (stat2?.isSymbolicLink()) problems.push(`refusing to publish symlink: ${dir}/${child}`);
       else if (name === ".meta.json") problems.push(nestedAreaProblem(docs, root, {
-        dir: path5.posix.dirname(`${dir}/${child}`),
+        dir: path6.posix.dirname(`${dir}/${child}`),
         refused: dir,
         refuser: "clear",
         areaDir
@@ -33091,13 +33057,13 @@ function versionFiles(docs, root, dir, areaDir, problems) {
   return files;
 }
 function clearProblems(docs, root, rel, areaDir, problems) {
-  const stat2 = lstatOrNull(path5.join(docs, rel));
+  const stat2 = lstatOrNull(path6.join(docs, rel));
   if (stat2?.isSymbolicLink()) problems.push(`refusing to publish symlink: ${rel}`);
   else if (stat2?.isDirectory()) {
-    if (lstatOrNull(path5.join(docs, rel, ".meta.json"))) {
+    if (lstatOrNull(path6.join(docs, rel, ".meta.json"))) {
       problems.push(nestedAreaProblem(docs, root, { dir: rel, refused: rel, refuser: "clear", areaDir }));
     }
-    for (const child of fs6.readdirSync(path5.join(docs, rel))) clearProblems(docs, root, `${rel}/${child}`, areaDir, problems);
+    for (const child of fs6.readdirSync(path6.join(docs, rel))) clearProblems(docs, root, `${rel}/${child}`, areaDir, problems);
   }
 }
 function placementProblems(docs, root, areaDir, versions) {
@@ -33111,27 +33077,28 @@ function placementProblems(docs, root, areaDir, versions) {
       return null;
     }
   };
-  const records = scan(docs, root).records;
+  const discovered = discoverAreas(docs, root);
+  const releaseAreas = discovered.releaseAreas();
   const scope = docsRoot(root);
   const labels = { Version: "Version folder", Branch: "Branch Version folder", Mirror: "mirror Area" };
-  for (let dir = areaDir; scope.contains(dir); dir = path5.posix.dirname(dir)) {
+  for (let dir = areaDir; scope.contains(dir); dir = path6.posix.dirname(dir)) {
     const record = read(dir);
     if (record) problems.push(`refusing to publish ${areaDir}: it sits inside a ${labels[record.kind]} at ${dir}`);
-    if (dir !== areaDir && records.some((record2) => record2.areaDir === dir && record2.dir !== dir)) {
+    if (dir !== areaDir && releaseAreas.has(dir)) {
       problems.push(`refusing to publish ${areaDir}: it sits inside a release Area at ${dir}`);
     }
   }
   for (const version of versions) {
-    const parent = path5.posix.dirname(version.versionDir);
+    const parent = path6.posix.dirname(version.versionDir);
     if (parent !== areaDir && read(parent)) problems.push(`refusing to publish ${version.versionDir}: it sits inside a mirror Area at ${parent}`);
   }
-  for (const mirror of scan(docs, root).mirrors) {
+  for (const mirror of discovered.claims.filter((claim) => claim.kind === "Mirror")) {
     if (mirror.dir.startsWith(`${areaDir}/`)) problems.push(mirrorAreaProblem(areaDir, mirror.dir));
   }
   return problems;
 }
 function planSharedArea({ docs, root, entry, repository, branch, docsRepository, versions = [], areaFiles = /* @__PURE__ */ new Map() }) {
-  const areaDir = path5.posix.join(root, entry.area);
+  const areaDir = path6.posix.join(root, entry.area);
   const groups = /* @__PURE__ */ new Map();
   const add = (name, version, dir, metadata, files2) => {
     if (!groups.has(name)) groups.set(name, /* @__PURE__ */ new Map());
@@ -33139,28 +33106,35 @@ function planSharedArea({ docs, root, entry, repository, branch, docsRepository,
   };
   const problems = [];
   const records = markerRecords(docs, root, areaDir, (_dir, error2) => problems.push(error2.message));
+  let own = null;
+  try {
+    own = skippedRecordAt(docs, areaDir);
+  } catch (error2) {
+    if (!(error2 instanceof FatalError)) throw error2;
+    problems.push(error2.message);
+  }
   const branchDirs = new Set(records.filter((record) => record.kind === "Branch").map((record) => record.dir));
   try {
-    assertRecordOwners(records, [areaDir], root, repository);
+    assertRecordOwners([...records, ...own ? [own] : []], [areaDir], root, repository);
   } catch (error2) {
     if (!(error2 instanceof FatalError)) throw error2;
     problems.push(error2.message);
   }
   problems.push(...placementProblems(docs, root, areaDir, versions));
-  for (const child of lstatOrNull(path5.join(docs, areaDir))?.isDirectory() ? fs6.readdirSync(path5.join(docs, areaDir)) : []) {
-    if (lstatOrNull(path5.join(docs, areaDir, child))?.isSymbolicLink()) problems.push(`refusing to publish symlink: ${areaDir}/${child}`);
+  for (const child of lstatOrNull(path6.join(docs, areaDir))?.isDirectory() ? fs6.readdirSync(path6.join(docs, areaDir)) : []) {
+    if (lstatOrNull(path6.join(docs, areaDir, child))?.isSymbolicLink()) problems.push(`refusing to publish symlink: ${areaDir}/${child}`);
   }
-  const packageNames = entry.packages === void 0 ? [null] : folderNames(path5.join(docs, areaDir));
+  const packageNames = entry.packages === void 0 ? [null] : folderNames(path6.join(docs, areaDir));
   for (const name of packageNames) {
-    const parent = path5.posix.join(areaDir, ...name ? [name] : []);
-    if (name && lstatOrNull(path5.join(docs, parent, ".meta.json"))) continue;
-    for (const child of lstatOrNull(path5.join(docs, parent))?.isDirectory() ? fs6.readdirSync(path5.join(docs, parent)) : []) {
-      if (lstatOrNull(path5.join(docs, parent, child))?.isSymbolicLink()) problems.push(`refusing to publish symlink: ${parent}/${child}`);
+    const parent = path6.posix.join(areaDir, ...name ? [name] : []);
+    if (name && lstatOrNull(path6.join(docs, parent, ".meta.json"))) continue;
+    for (const child of lstatOrNull(path6.join(docs, parent))?.isDirectory() ? fs6.readdirSync(path6.join(docs, parent)) : []) {
+      if (lstatOrNull(path6.join(docs, parent, child))?.isSymbolicLink()) problems.push(`refusing to publish symlink: ${parent}/${child}`);
     }
-    const children = folderNames(path5.join(docs, parent));
+    const children = folderNames(path6.join(docs, parent));
     for (const version of children) {
       const dir = `${parent}/${version}`;
-      const marker = path5.join(docs, dir, ".meta.json");
+      const marker = path6.join(docs, dir, ".meta.json");
       const stat2 = lstatOrNull(marker);
       const semver = SEMVER_REGEX.test(version.replace(/^v/, ""));
       if (!stat2) {
@@ -33183,8 +33157,8 @@ function planSharedArea({ docs, root, entry, repository, branch, docsRepository,
       const content = versionFiles(docs, root, dir, areaDir, problems);
       add(name, version, dir, metadata, content);
     }
-    const present = lstatOrNull(path5.join(docs, parent))?.isDirectory() ? fs6.readdirSync(path5.join(docs, parent)) : [];
-    const hasShared = present.includes("versions.json") || (name ? present.some((file) => lstatOrNull(path5.join(docs, parent, file))?.isFile() && (file === entry.mainFile || path5.posix.extname(file).toLowerCase() === ".md")) : present.includes("latest"));
+    const present = lstatOrNull(path6.join(docs, parent))?.isDirectory() ? fs6.readdirSync(path6.join(docs, parent)) : [];
+    const hasShared = present.includes("versions.json") || (name ? present.some((file) => lstatOrNull(path6.join(docs, parent, file))?.isFile() && (file === entry.mainFile || path6.posix.extname(file).toLowerCase() === ".md")) : present.includes("latest"));
     if (!children.some((child) => SEMVER_REGEX.test(child.replace(/^v/, ""))) && hasShared) {
       problems.push(`half-deleted package: ${parent} has shared files or a latest copy but no Version folders`);
     }
@@ -33203,11 +33177,11 @@ function planSharedArea({ docs, root, entry, repository, branch, docsRepository,
   const warnings = [];
   const url = (...segments) => `https://raw.githubusercontent.com/${docsRepository}/${urlPath([
     branch,
-    path5.posix.join(root, ...segments.filter(Boolean))
+    path6.posix.join(root, ...segments.filter(Boolean))
   ])}`;
   for (const [name, group] of [...groups].sort(([a], [b]) => (a ?? "").localeCompare(b ?? ""))) {
     const sorted = [...group.values()].sort((a, b) => compareSemver(b.version, a.version) || a.version.localeCompare(b.version));
-    const parent = path5.posix.join(areaDir, ...name ? [name] : []);
+    const parent = path6.posix.join(areaDir, ...name ? [name] : []);
     for (const item of sorted) {
       if (!item.files.has(entry.mainFile)) warnings.push(
         `Warning: mainFile "${entry.mainFile}" is missing from older Version folder ${item.dir}`
@@ -33220,7 +33194,7 @@ function planSharedArea({ docs, root, entry, repository, branch, docsRepository,
     }))));
     const latest = sorted.find((item) => !SEMVER_REGEX.exec(item.version.replace(/^v/, "")).groups.prerelease);
     if (name) {
-      for (const child of lstatOrNull(path5.join(docs, parent))?.isDirectory() ? fs6.readdirSync(path5.join(docs, parent)) : []) {
+      for (const child of lstatOrNull(path6.join(docs, parent))?.isDirectory() ? fs6.readdirSync(path6.join(docs, parent)) : []) {
         if (group.has(child) || child === "versions.json" || branchDirs.has(`${parent}/${child}`)) continue;
         removals.push(`${parent}/${child}`);
       }
@@ -33230,12 +33204,13 @@ function planSharedArea({ docs, root, entry, repository, branch, docsRepository,
     if (!latest) continue;
     const target = name ? parent : `${parent}/latest`;
     for (const [rel, file] of latest.files) put(files, `${target}/${rel}`, file);
-    if (name) rows.push({ name, version: latest.version, files: [...latest.files.keys()].filter((rel) => path5.posix.extname(rel).toLowerCase() === ".md").sort((a, b) => a === "README.md" ? -1 : b === "README.md" ? 1 : a.localeCompare(b)).map((rel) => ({ name: rel, url: url(entry.area, name, rel) })) });
+    if (name) rows.push({ name, version: latest.version, files: [...latest.files.keys()].filter((rel) => path6.posix.extname(rel).toLowerCase() === ".md").sort((a, b) => a === "README.md" ? -1 : b === "README.md" ? 1 : a.localeCompare(b)).map((rel) => ({ name: rel, url: url(entry.area, name, rel) })) });
   }
   if (entry.packages !== void 0) put(files, `${areaDir}/index.json`, metaFile({ [entry.area.split("/").at(-1)]: rows }));
-  for (const name of lstatOrNull(path5.join(docs, areaDir))?.isDirectory() ? fs6.readdirSync(path5.join(docs, areaDir)) : []) {
+  for (const name of lstatOrNull(path6.join(docs, areaDir))?.isDirectory() ? fs6.readdirSync(path6.join(docs, areaDir)) : []) {
     const rel = `${areaDir}/${name}`;
-    if (!lstatOrNull(path5.join(docs, rel))?.isDirectory() && !files.has(rel)) removals.push(rel);
+    if (name === SKIPPED_TAGS_FILE) continue;
+    if (!lstatOrNull(path6.join(docs, rel))?.isDirectory() && !files.has(rel)) removals.push(rel);
   }
   try {
     assertAreaWritable(docs, areaDir, files, removals);
@@ -33250,14 +33225,14 @@ function planSharedArea({ docs, root, entry, repository, branch, docsRepository,
     } catch (error2) {
       problems.push(error2.message);
     }
-    const stat2 = lstatOrNull(path5.join(docs, rel));
+    const stat2 = lstatOrNull(path6.join(docs, rel));
     if (stat2?.isDirectory() && !removals.some((dir) => rel === dir || rel.startsWith(`${dir}/`))) problems.push(`not a file: ${rel}`);
-    for (let parent = path5.posix.dirname(rel); parent.startsWith(`${areaDir}/`); parent = path5.posix.dirname(parent)) {
+    for (let parent = path6.posix.dirname(rel); parent.startsWith(`${areaDir}/`); parent = path6.posix.dirname(parent)) {
       const marker = `${parent}/.meta.json`;
-      if (lstatOrNull(path5.join(docs, marker))) {
+      if (lstatOrNull(path6.join(docs, marker))) {
         problems.push(nestedAreaProblem(docs, root, { dir: parent, refused: rel, refuser: "write", areaDir, overlap: true }));
       }
-      const parentStat = lstatOrNull(path5.join(docs, parent));
+      const parentStat = lstatOrNull(path6.join(docs, parent));
       if (parentStat && !parentStat.isDirectory() && !removals.includes(parent)) problems.push(`not a folder: ${parent}`);
     }
   }
@@ -33267,8 +33242,8 @@ function planSharedArea({ docs, root, entry, repository, branch, docsRepository,
 function writeSharedArea(docs, plan) {
   const removed = [];
   for (const rel of plan.removals) {
-    if (!lstatOrNull(path5.join(docs, rel))) continue;
-    fs6.rmSync(path5.join(docs, rel), { recursive: true, force: true });
+    if (!lstatOrNull(path6.join(docs, rel))) continue;
+    fs6.rmSync(path6.join(docs, rel), { recursive: true, force: true });
     removed.push(rel);
   }
   for (const [rel, file] of plan.files) writeFile2(docs, rel, file);
@@ -33283,27 +33258,27 @@ function snapshotAreaState(docs, root, areaDir, entry, isPruned = () => false) {
   const metadata = [];
   const records = markerRecords(docs, root, areaDir, (dir, error2) => {
     const rel = `${dir}/.meta.json`;
-    metadata.push([rel, lstatOrNull(path5.join(docs, rel))?.isFile() ? fs6.readFileSync(path5.join(docs, rel), "utf8") : error2.message]);
+    metadata.push([rel, lstatOrNull(path6.join(docs, rel))?.isFile() ? fs6.readFileSync(path6.join(docs, rel), "utf8") : error2.message]);
   });
   for (const record of records) {
     if (record.areaDir !== areaDir || isPruned(record.dir)) continue;
     const rel = `${record.dir}/.meta.json`;
-    metadata.push([rel, fs6.readFileSync(path5.join(docs, rel), "utf8")]);
+    metadata.push([rel, fs6.readFileSync(path6.join(docs, rel), "utf8")]);
   }
   const owned = new Set(folders.map((folder) => folder.name));
   const shared = [];
   for (const rel of rebuiltFiles(docs, areaDir, entry, isPruned, owned)) {
-    shared.push([rel, fs6.readFileSync(path5.join(docs, rel)).toString("base64")]);
+    shared.push([rel, fs6.readFileSync(path6.join(docs, rel)).toString("base64")]);
   }
   return JSON.stringify({ metadata, shared });
 }
 function rebuiltFiles(docs, areaDir, entry, isPruned, owned) {
   const files = [];
   const walk = (dir) => {
-    for (const name of fs6.readdirSync(path5.join(docs, dir)).sort()) {
+    for (const name of fs6.readdirSync(path6.join(docs, dir)).sort()) {
       const rel = `${dir}/${name}`;
       if (isPruned(rel)) continue;
-      const stat2 = lstatOrNull(path5.join(docs, rel));
+      const stat2 = lstatOrNull(path6.join(docs, rel));
       if (!stat2) continue;
       if (!stat2.isDirectory()) {
         if (stat2.isFile()) files.push(rel);
@@ -33313,21 +33288,21 @@ function rebuiltFiles(docs, areaDir, entry, isPruned, owned) {
       walk(rel);
     }
   };
-  if (lstatOrNull(path5.join(docs, areaDir))?.isDirectory()) walk(areaDir);
+  if (lstatOrNull(path6.join(docs, areaDir))?.isDirectory()) walk(areaDir);
   return files;
 }
 function keptFolder(docs, rel, areaDir, entry, owned) {
-  if (lstatOrNull(path5.join(docs, rel, ".meta.json"))) return true;
-  if (path5.posix.dirname(rel) !== areaDir) return false;
-  return entry.packages === void 0 ? rel !== `${areaDir}/latest` : !owned.has(path5.posix.basename(rel));
+  if (lstatOrNull(path6.join(docs, rel, ".meta.json"))) return true;
+  if (path6.posix.dirname(rel) !== areaDir) return false;
+  return entry.packages === void 0 ? rel !== `${areaDir}/latest` : !owned.has(path6.posix.basename(rel));
 }
 
 // src/publisher/release.mjs
 import fs7 from "node:fs";
-import path7 from "node:path";
+import path9 from "node:path";
 
 // src/publisher/push.mjs
-import path6 from "node:path";
+import path7 from "node:path";
 var MAX_PUSH_ATTEMPTS = 5;
 var BACKOFF_STEP_MS = Number(process.env.DOCS_PUBLISHER_BACKOFF_STEP_MS ?? 5e3);
 function syncToBranch(docs, branch) {
@@ -33341,7 +33316,7 @@ function syncToBranch(docs, branch) {
 function sourceBranchMoved(source, branch) {
   const remotes = gitStatus(source, ["remote"]);
   if (remotes.status !== 0 || !remotes.stdout.split("\n").map((name) => name.trim()).includes("origin")) return false;
-  const fetch2 = gitRemote(source, ["fetch", "--quiet", "--force", "--tags", "origin"]);
+  const fetch2 = gitRemote(source, ["fetch", "--quiet", "--force", "--tags", "--prune", "--prune-tags", "origin"]);
   if (fetch2.status !== 0) {
     throw new FatalError(`could not fetch the source branch "${branch}" from origin: ${fetch2.stderr.trim()}`);
   }
@@ -33349,10 +33324,21 @@ function sourceBranchMoved(source, branch) {
   if (tip.status !== 0) return false;
   return tip.stdout.trim() !== git(source, ["rev-parse", "HEAD"]);
 }
+function originTagRevision(source, tag) {
+  const remotes = gitStatus(source, ["remote"]);
+  const hasOrigin = remotes.status === 0 && remotes.stdout.split("\n").map((name) => name.trim()).includes("origin");
+  if (!hasOrigin) return tagRevision(source, tag);
+  const result = gitRemote(source, ["ls-remote", "--tags", "origin", `refs/tags/${tag}`, `refs/tags/${tag}^{}`]);
+  if (result.status !== 0) throw new FatalError(`could not read tag "${tag}" from origin: ${result.stderr.trim()}`);
+  const refs = result.stdout.split("\n").map((line) => line.split("	")).filter(([commit, ref]) => commit && ref);
+  const peeled = refs.find(([, ref]) => ref === `refs/tags/${tag}^{}`);
+  const direct = refs.find(([, ref]) => ref === `refs/tags/${tag}`);
+  return (peeled ?? direct)?.[0] ?? null;
+}
 function stageablePaths(docs, paths) {
   const present = [];
   const missing = [];
-  for (const rel of paths) (lstatOrNull(path6.join(docs, rel)) ? present : missing).push(rel);
+  for (const rel of paths) (lstatOrNull(path7.join(docs, rel)) ? present : missing).push(rel);
   return [...present, ...trackedPaths(docs, missing)];
 }
 function classifyStagedEffects(docs, { mirrors = [], releases = [], prune = { removals: [], files: [] } }) {
@@ -33384,7 +33370,7 @@ function publishWithRetry({ docs, branch, areaDirs, message, write }) {
     if (outputPaths.length > 0) {
       git(docs, ["--literal-pathspecs", "add", "-f", "--pathspec-from-file=-", "--pathspec-file-nul"], `${outputPaths.join("\0")}\0`);
     }
-    const staged = areaDirs.filter((areaDir) => lstatOrNull(path6.join(docs, areaDir)) !== null);
+    const staged = areaDirs.filter((areaDir) => lstatOrNull(path7.join(docs, areaDir)) !== null);
     for (const areaDir of staged) git(docs, ["add", "-A", "--", `:(literal)${areaDir}`]);
     if (gitStatus(docs, ["diff", "--staged", "--quiet"]).status === 0) return { changed: false, commitSha: null };
     git(docs, ["commit", "--quiet", "-m", typeof message === "function" ? message() : message]);
@@ -33397,10 +33383,43 @@ function publishWithRetry({ docs, branch, areaDirs, message, write }) {
   throw new FatalError(`push failed after ${MAX_PUSH_ATTEMPTS} attempts: ${rejection}`);
 }
 
+// src/publisher/version-folders.mjs
+import path8 from "node:path";
+function versionTargeting({ source, root, entry }) {
+  const names = readTagNames(source, entry);
+  const packagesDir = entry.packages === void 0 ? null : nestedRepoPath(entry.packages).path;
+  return {
+    forTag({ name, version }) {
+      const folder = name === null ? null : folderForTagName(names, name);
+      return {
+        name: folder,
+        version,
+        folder: folder === null ? null : path8.posix.join(packagesDir, folder),
+        versionDir: path8.posix.join(root, entry.area, ...folder === null ? [] : [folder], version)
+      };
+    },
+    tagFor(name, version) {
+      if (!name) return version;
+      return `${names?.get(name) ?? name}-v${version}`;
+    }
+  };
+}
+function folderForTagName(map, tagName) {
+  if (!map) return tagName;
+  for (const [folder, tag] of map) {
+    if (tag !== tagName) continue;
+    if (isReservedName(folder)) {
+      throw new FatalError(`tag component "${tagName}" resolves to "${folder}", a name the publisher reserves`);
+    }
+    return folder;
+  }
+  return tagName;
+}
+
 // src/publisher/release.mjs
 function collectPackage({ source, entry, name, dir, marker }) {
-  const pkgDir = name ? path7.join(source, entry.packages, name) : source;
-  if (name) assertNoSymlinkAncestors(source, path7.posix.join(entry.packages, name));
+  const pkgDir = name ? path9.join(source, entry.packages, name) : source;
+  if (name) assertNoSymlinkAncestors(source, path9.posix.join(entry.packages, name));
   if (name && !lstatOrNull(pkgDir)?.isDirectory()) {
     throw new TagContentError(`package folder not found: ${entry.packages}/${name}`);
   }
@@ -33411,8 +33430,8 @@ function collectPackage({ source, entry, name, dir, marker }) {
   rules.set(`${dir}/.meta.json`, "the publisher");
   for (const rule of entry.collect) {
     for (const file of collectFiles(pkgDir, rule)) {
-      const rel = path7.posix.join(dir, file.to);
-      assertCollectable(rel, path7.relative(source, file.from), dir);
+      const rel = path9.posix.join(dir, file.to);
+      assertCollectable(rel, path9.relative(source, file.from), dir);
       put(files, rel, { content: file.content });
       rules.set(rel, `collect "${rule.from}" to "${rule.to}"`);
     }
@@ -33421,20 +33440,19 @@ function collectPackage({ source, entry, name, dir, marker }) {
   if (files.size === 1) throw new TagContentError("collect matched no files");
   return files;
 }
-function planVersion({ source, root, entry, release, repository, date, tag }) {
-  const versionDir = path7.posix.join(root, entry.area, ...release.name ? [release.name] : [], release.version);
+function planVersion({ source, entry, target, repository, date, tag, sourceRevision }) {
   const files = collectPackage({
     source,
     entry,
-    name: release.name,
-    dir: versionDir,
-    marker: { source: repository, tag, date, specHash: specHash(entry) }
+    name: target.name,
+    dir: target.versionDir,
+    marker: { source: repository, tag, sourceRevision, date, specHash: specHash(entry) }
   });
-  return { versionDir, name: release.name, version: release.version, files };
+  return { versionDir: target.versionDir, name: target.name, version: target.version, files };
 }
 function branchVersionDir(root, entry, name, branch) {
-  const areaDir = path7.posix.join(root, entry.area);
-  const dir = path7.posix.join(areaDir, ...name ? [name] : [], branch);
+  const areaDir = path9.posix.join(root, entry.area);
+  const dir = path9.posix.join(areaDir, ...name ? [name] : [], branch);
   if (!dir.startsWith(`${areaDir}/`)) {
     throw new FatalError(
       `refusing to publish the Branch Version folder of the Area "${entry.area}" outside it: "${branch}" leaves the Area`
@@ -33456,7 +33474,7 @@ function planBranchVersion({ source, root, entry, name, repository, branch, revi
 function planBranchVersions({ source, root, entry, repository, branch, revision, names }) {
   if (entry.publishSourceBranch !== true) return [];
   const packagesDir = entry.packages === void 0 ? void 0 : nestedRepoPath(entry.packages).path;
-  const wanted = names ?? (packagesDir === void 0 ? [null] : folderNames(path7.join(source, packagesDir)));
+  const wanted = names ?? (packagesDir === void 0 ? [null] : folderNames(path9.join(source, packagesDir)));
   if (wanted.length === 0) return [];
   const date = commitDate(source, revision);
   return wanted.map((name) => planBranchVersion({ source, root, entry, name, repository, branch, revision, date }));
@@ -33467,7 +33485,7 @@ function touchedPackages({ source, entry, changed }) {
   const packagesDir = nestedRepoPath(entry.packages).path;
   const prefix = packagesDir === "." ? "" : `${packagesDir}/`;
   const names = changed.filter((file) => file.startsWith(prefix)).map((file) => file.slice(prefix.length).split("/")[0]);
-  return [...new Set(names)].filter((name) => name !== "" && lstatOrNull(path7.join(source, packagesDir, name))?.isDirectory());
+  return [...new Set(names)].filter((name) => name !== "" && lstatOrNull(path9.join(source, packagesDir, name))?.isDirectory());
 }
 function rebuildPackages({ source, docs, root, entry, branch, changed, tip }) {
   const head = git(source, ["rev-parse", "HEAD"]);
@@ -33480,7 +33498,7 @@ function rebuildPackages({ source, docs, root, entry, branch, changed, tip }) {
     }
     return diffs.get(revision);
   };
-  const candidates = entry.packages === void 0 ? [null] : folderNames(path7.join(source, nestedRepoPath(entry.packages).path));
+  const candidates = entry.packages === void 0 ? [null] : folderNames(path9.join(source, nestedRepoPath(entry.packages).path));
   return candidates.filter((name) => {
     let record;
     try {
@@ -33499,46 +33517,100 @@ function rebuildPackages({ source, docs, root, entry, branch, changed, tip }) {
   });
 }
 function publishRelease({ args, release, repository, root }) {
-  if (!tagExists(args.source, args.tag)) throw new FatalError(`tag ${args.tag} not found in ${args.source}`);
+  const sourceRevision = tagCommit(args.source, args.tag);
+  if (sourceRevision === null) throw new FatalError(`tag ${args.tag} not found in ${args.source}`);
   const date = tagDate(args.source, args.tag);
-  return withTagWorktree(args.source, args.tag, (tagSource) => publishAtTag({ args, release, repository, root, date, tagSource }));
+  return withTagWorktree(args.source, args.tag, (tagSource) => publishAtTag(
+    { args, release, repository, root, date, tagSource, sourceRevision }
+  ));
 }
-function publishedTag(docs, root, versionDir, repository) {
+function missingTagVersions({ docs, root, repository, tag, sourceRevision, missing }) {
+  const kept = [];
+  const moved = [];
+  for (const area of missing) {
+    const marker = publishedMarker(docs, root, area.versionDir, repository);
+    if (marker?.tag !== tag) continue;
+    if (marker.sourceRevision === sourceRevision) kept.push(area);
+    else moved.push(area);
+  }
+  return { kept, moved };
+}
+function movedTagProblems(tag, moved) {
+  return [...new Set(moved.map(({ entry, name, versionDir }) => `refusing to publish \`${tag}\` over \`${versionDir}\`: the tag points at a commit without the \`${entry.packages}/${name}\` folder, and the docs hold its Version. Its bytes are kept.`))];
+}
+function releaseStateProblems({ docs, root, entries }) {
+  const problems = [];
+  for (const entry of entries) {
+    try {
+      readSkippedTags(docs, path9.posix.join(root, entry.area));
+    } catch (error2) {
+      if (!(error2 instanceof FatalError)) throw error2;
+      problems.push(error2.message);
+    }
+  }
+  return problems;
+}
+function publishedMarker(docs, root, versionDir, repository) {
   const metadata = markerRecordAt(docs, root, versionDir);
-  return metadata?.source === repository ? metadata.tag : null;
+  return metadata?.source === repository ? metadata : null;
 }
-function publishAtTag({ args, release, repository, root, date, tagSource }) {
+function publishAtTag({ args, release, repository, root, date, tagSource, sourceRevision }) {
   const candidates = readEntries(args.entries, args["source-branch"]).filter(
     (entry) => entry.mode === "release" && entry.packages !== void 0 === Boolean(release.name)
   );
-  const folders = new Map(candidates.map((entry) => [entry, release.name ? folderForTagName(readTagNames(args.source, entry), release.name) : null]));
+  const targets = new Map(candidates.map((entry) => [
+    entry,
+    versionTargeting({ source: args.source, root, entry }).forTag(release)
+  ]));
   const releases = candidates.filter((entry) => {
     if (!release.name) return true;
-    const rel = path7.posix.join(entry.packages, folders.get(entry));
-    assertNoSymlinkAncestors(tagSource, rel);
-    return lstatOrNull(path7.join(tagSource, rel))?.isDirectory() === true;
+    const { folder } = targets.get(entry);
+    assertNoSymlinkAncestors(tagSource, folder);
+    return lstatOrNull(path9.join(tagSource, folder))?.isDirectory() === true;
   });
-  for (const entry of candidates) {
-    if (!releases.includes(entry)) writeSummary(
-      `Skipped \`${args.tag}\` for area \`${entry.area}\`: no \`${entry.packages}/${folders.get(entry)}\` folder at the tag.`
-    );
-  }
+  const missing = candidates.filter((entry) => !releases.includes(entry)).map((entry) => ({
+    entry,
+    ...targets.get(entry)
+  }));
+  const keptMissing = /* @__PURE__ */ new Set();
+  const reportMissing = () => {
+    for (const { entry, name, versionDir } of missing) {
+      writeSummary(keptMissing.has(versionDir) ? `Already published \`${args.tag}\` in area \`${entry.area}\`: kept \`${versionDir}\` as it is.` : `Skipped \`${args.tag}\` for area \`${entry.area}\`: no \`${entry.packages}/${name}\` folder at the tag.`);
+    }
+  };
+  const readReleaseState = () => {
+    keptMissing.clear();
+    const problems = releaseStateProblems({ docs: args.docs, root, entries: candidates });
+    if (missing.length > 0) {
+      const { kept: kept2, moved } = missingTagVersions({ docs: args.docs, root, repository, tag: args.tag, sourceRevision, missing });
+      for (const { versionDir } of kept2) keptMissing.add(versionDir);
+      problems.push(...movedTagProblems(args.tag, moved));
+    }
+    if (problems.length > 0) throw new FatalError([...new Set(problems)].join("\n"));
+  };
   if (releases.length === 0) {
+    if (missing.length > 0) {
+      syncToBranch(args.docs, args.branch);
+      readReleaseState();
+    }
+    reportMissing();
     if (candidates.length === 0) writeSummary(`Skipped \`${args.tag}\`: no release entry publishes it. Add entries to \`.github/docs_publisher.yaml\`.`);
     return { changed: false, commitSha: null };
   }
   const published = releases.filter((entry) => entry.prereleases || !release.prerelease);
   if (published.length === 0) {
+    syncToBranch(args.docs, args.branch);
+    readReleaseState();
+    reportMissing();
     writeSummary(`Skipped \`${args.tag}\`: a prerelease is published only by an entry with \`prereleases: true\`.`);
     return { changed: false, commitSha: null };
   }
   const areas = published.map((entry) => {
-    const name = folders.get(entry);
-    const areaDir = path7.posix.join(root, entry.area);
+    const areaDir = path9.posix.join(root, entry.area);
     return {
       entry,
       areaDir,
-      versionDir: path7.posix.join(areaDir, ...name ? [name] : [], release.version),
+      ...targets.get(entry),
       areaFiles: readAreaFiles(args.source, areaDir, entry),
       state: null
     };
@@ -33559,38 +33631,56 @@ function publishAtTag({ args, release, repository, root, date, tagSource }) {
       movedAreaFiles.clear();
       let moved;
       const sourceMoved = () => moved ??= sourceBranchMoved(args.source, args["source-branch"]);
+      const onOrigin = originTagRevision(args.source, args.tag);
+      if (onOrigin === null) {
+        throw new FatalError(
+          `refusing to publish \`${args.tag}\`: origin holds no such tag, so this run cannot tell which commit published the docs. Publish the tag again from the commit it names.`
+        );
+      }
+      if (onOrigin !== sourceRevision) {
+        throw new FatalError(
+          `refusing to publish \`${args.tag}\`: origin names ${onOrigin}, but this run built ${sourceRevision}. A newer publish may already hold the docs; publish the tag again from the commit it names.`
+        );
+      }
       try {
-        assertRecordOwners(scan(args.docs, root).records, areas.map((area) => area.areaDir), root, repository);
+        assertRecordOwners(discoverAreas(args.docs, root).claims, areas.map((area) => area.areaDir), root, repository);
+      } catch (error2) {
+        if (!(error2 instanceof FatalError)) throw error2;
+        problems.push(error2.message);
+      }
+      try {
+        readReleaseState();
       } catch (error2) {
         if (!(error2 instanceof FatalError)) throw error2;
         problems.push(error2.message);
       }
       for (const area of areas) {
         area.state ??= snapshotAreaState(args.docs, root, area.areaDir, area.entry);
-        const tag = publishedTag(args.docs, root, area.versionDir, repository);
-        if (tag === args.tag) {
+        const marker = publishedMarker(args.docs, root, area.versionDir, repository);
+        if (marker?.tag === args.tag && marker.sourceRevision === sourceRevision) {
           kept.add(area);
           continue;
         }
-        if (tag !== null) {
-          problems.push(`refusing to publish \`${args.tag}\` over \`${tag}\` in \`${area.versionDir}\`: a Version folder keeps the tag that published it`);
+        if (marker && marker.tag !== args.tag) {
+          problems.push(`refusing to publish \`${args.tag}\` over \`${marker.tag}\` in \`${area.versionDir}\`: a Version folder keeps the tag that published it`);
           continue;
         }
         try {
           assertNoSymlinkPath(args.docs, area.versionDir);
           const version = planVersion({
             source: tagSource,
-            root,
             entry: area.entry,
-            release: { ...release, name: folders.get(area.entry) },
+            target: area,
             repository,
             date,
-            tag: args.tag
+            tag: args.tag,
+            sourceRevision
           });
           const fresh = snapshotAreaState(args.docs, root, area.areaDir, area.entry) === area.state;
           if (!fresh) staleAreaFiles.add(area);
           else if (sourceMoved()) movedAreaFiles.add(area);
           plans.push({
+            area,
             version,
             plan: planSharedArea({
               docs: args.docs,
@@ -33610,12 +33700,15 @@ function publishAtTag({ args, release, repository, root, date, tagSource }) {
       }
       if (problems.length) throw new FatalError([...new Set(problems)].join("\n"));
       for (const { version } of plans) {
-        fs7.rmSync(path7.join(args.docs, version.versionDir), { recursive: true, force: true });
+        fs7.rmSync(path9.join(args.docs, version.versionDir), { recursive: true, force: true });
         for (const [rel, file] of version.files) writeFile2(args.docs, rel, file);
       }
+      const cleared = plans.map(({ area }) => planTagClear({ docs: args.docs, areaDir: area.areaDir, tag: args.tag, repository })).filter(Boolean);
+      for (const change of cleared) applySkippedTagsChange(args.docs, change);
       return [
         ...plans.flatMap(({ version }) => [...version.files.keys()]),
-        ...plans.flatMap(({ plan }) => writeSharedArea(args.docs, plan))
+        ...plans.flatMap(({ plan }) => writeSharedArea(args.docs, plan)),
+        ...cleared.map(({ rel }) => rel)
       ];
     }
   });
@@ -33624,14 +33717,213 @@ function publishAtTag({ args, release, repository, root, date, tagSource }) {
   }
   for (const area of staleAreaFiles) keptAreaFilesSummary(area.areaDir, "this release");
   for (const area of movedAreaFiles) staleAreaFilesSummary(area.areaDir, args["source-branch"]);
+  reportMissing();
   if (kept.size === areas.length) return { changed, commitSha };
   writeSummary(changed ? `Published \`${args.tag}\` to \`${args.branch}\` under \`${areas.find((area) => !kept.has(area)).versionDir}\`.` : `Nothing to publish for \`${args.tag}\`: the docs repo already holds it.`);
   return { changed, commitSha };
 }
 
-// src/publisher/mirror.mjs
+// src/publisher/prune.mjs
 import fs8 from "node:fs";
-import path8 from "node:path";
+import path10 from "node:path";
+function assertInsideRoot(root, rel) {
+  if (!docsRoot(root).containsBelow(rel)) {
+    throw new FatalError(`refusing to delete ${rel}: it is not under the docs root "${root}"`);
+  }
+}
+var inside = (rel, dir) => rel === dir || rel.startsWith(`${dir}/`);
+function prunedView(removals, { plannedDirs, mirrorAreas }) {
+  const depth = (dir) => dir.split("/").length;
+  const deepest = (dirs) => Math.max(0, ...dirs.map(depth));
+  const kept = [...mirrorAreas].filter((dir) => !plannedDirs.has(dir));
+  return (rel) => {
+    const deletes = removals.filter(({ dir }) => inside(rel, dir)).map(({ dir }) => dir);
+    return deletes.length > 0 && deepest(deletes) >= deepest(kept.filter((dir) => inside(rel, dir)));
+  };
+}
+function packageFolderGone(source, entry, name, checked) {
+  if (!checked.has(entry)) {
+    if (!hasTreeAt(source, "HEAD", entry.packages)) {
+      throw new FatalError(
+        `Area "${entry.area}": the packages folder "${entry.packages}" is not in the source checkout, so no package can be told apart from a removed one. To retire the whole Area, remove its entry from docs_publisher.yaml.`
+      );
+    }
+    checked.add(entry);
+  }
+  return !hasTreeAt(source, "HEAD", path10.posix.join(entry.packages, name));
+}
+function missingVersionChildren(docs, dir, plannedDirs) {
+  const problems = [];
+  for (const name of folderNames(path10.join(docs, dir))) {
+    const child = `${dir}/${name}`;
+    if (plannedDirs.has(child) || !SEMVER_REGEX.test(name.replace(/^v/, ""))) continue;
+    const marker = `${child}/.meta.json`;
+    if (!lstatOrNull(path10.join(docs, marker))) problems.push(`Version folder ${child} has no .meta.json`);
+  }
+  return problems;
+}
+function planPrune({ docs, source, root, repository, entries }) {
+  const { claims, damaged } = discoverAreas(docs, root);
+  const versions = claims.filter((claim) => claim.kind === "Version");
+  const branches = claims.filter((claim) => claim.kind === "Branch");
+  const mirrors = claims.filter((claim) => claim.kind === "Mirror");
+  const skipped = claims.filter((claim) => claim.kind === "Skipped");
+  const ownedDirs = new Set(claims.filter((claim) => claim.source === repository).map((claim) => claim.dir));
+  const mirrorAreas = new Map(entries.filter((entry) => entry.mode === "mirror").map((entry) => [path10.posix.join(root, entry.area), entry]));
+  const releaseAreas = new Map(entries.filter((entry) => entry.mode === "release").map((entry) => [path10.posix.join(root, entry.area), entry]));
+  const removals = [];
+  const files = [];
+  const problems = [];
+  const warnings = [];
+  const checked = /* @__PURE__ */ new Set();
+  const removedVersions = /* @__PURE__ */ new Set();
+  const areaRemoval = (areaDir, mode) => {
+    const other = mode === "mirror" ? releaseAreas : mirrorAreas;
+    return other.has(areaDir) ? { kind: "mode-change", reason: `its entry is now in ${mode === "mirror" ? "release" : "mirror"} mode` } : { kind: "area-gone", reason: "its entry is gone from docs_publisher.yaml" };
+  };
+  const retiredAreas = /* @__PURE__ */ new Set();
+  const retireTopFiles = (areaDir) => {
+    retiredAreas.add(areaDir);
+    for (const child of fs8.readdirSync(path10.join(docs, areaDir), { withFileTypes: true })) {
+      if (child.isFile()) files.push({ rel: `${areaDir}/${child.name}`, areaDir });
+    }
+  };
+  for (const mirror of mirrors) {
+    if (!ownedDirs.has(mirror.dir)) continue;
+    if (!mirrorAreas.has(mirror.dir)) removals.push({ dir: mirror.dir, areaDir: mirror.areaDir, ...areaRemoval(mirror.dir, "mirror") });
+  }
+  const byArea = groupBy(versions, (version) => version.areaDir);
+  for (const [areaDir, inArea] of [...byArea].sort(([a], [b]) => a.localeCompare(b))) {
+    if (!inArea.some((version) => ownedDirs.has(version.dir))) continue;
+    const entry = releaseAreas.get(areaDir);
+    const retire = (group) => {
+      for (const version of group) {
+        removedVersions.add(version.dir);
+        if (!tagExists(source, version.tag)) warnings.push({
+          dir: version.dir,
+          message: `Warning: pruned \`${version.dir}\` has no tag \`${version.tag}\` in the source repo, so only the docs repo's git history can restore it.`
+        });
+      }
+    };
+    if (!entry) {
+      retire(inArea);
+      const removal = areaRemoval(areaDir, "release");
+      const named = inArea.some((version) => version.packageDir);
+      const dirs = named ? [...new Set(inArea.map((version) => version.packageDir).filter(Boolean))] : [...inArea.map((version) => version.dir), `${areaDir}/latest`];
+      for (const dir of dirs) removals.push({ dir, areaDir, ...removal });
+      retireTopFiles(areaDir);
+      continue;
+    }
+    if (entry.packages === void 0) continue;
+    const byPackage = groupBy(inArea.filter((version) => version.packageDir), (version) => version.packageDir);
+    for (const [packageDir, group] of byPackage) {
+      if (!packageFolderGone(source, entry, path10.posix.basename(packageDir), checked)) continue;
+      retire(group);
+      removals.push({ dir: packageDir, areaDir, kind: "package-gone", reason: `\`${entry.packages}/${path10.posix.basename(packageDir)}\` is gone from the source repo` });
+    }
+  }
+  for (const branch of branches) {
+    if (!ownedDirs.has(branch.dir)) continue;
+    const { areaDir, name } = branch;
+    const entry = releaseAreas.get(areaDir);
+    if (entry?.publishSourceBranch !== true) {
+      removals.push({ dir: branch.dir, areaDir, ...entry ? { kind: "branch-off", reason: "its entry no longer publishes the source branch" } : areaRemoval(areaDir, "release") });
+      if (!entry && !retiredAreas.has(areaDir)) retireTopFiles(areaDir);
+      continue;
+    }
+    if (name !== null && entry.packages !== void 0 && packageFolderGone(source, entry, name, checked)) {
+      removals.push({ dir: branch.dir, areaDir, kind: "package-gone", reason: `\`${entry.packages}/${name}\` is gone from the source repo` });
+    }
+  }
+  for (const record of skipped) {
+    const { areaDir } = record;
+    if (releaseAreas.has(areaDir) || retiredAreas.has(areaDir) || !ownedDirs.has(areaDir)) continue;
+    if (removals.some((removal) => removal.dir === areaDir)) continue;
+    if (folderNames(path10.join(docs, areaDir)).length > 0) {
+      retireTopFiles(areaDir);
+      continue;
+    }
+    removals.push({ dir: areaDir, areaDir, ...areaRemoval(areaDir, "release") });
+  }
+  const plannedDirs = /* @__PURE__ */ new Set([...removals.map((removal) => removal.dir), ...removedVersions]);
+  const isPruned = prunedView(removals, { plannedDirs, mirrorAreas: mirrors.map((mirror) => mirror.areaDir) });
+  const affectedAreas = [
+    ...[...removals, ...files].map((change) => change.areaDir),
+    ...claims.filter((claim) => isPruned(claim.areaDir)).map((claim) => claim.areaDir)
+  ];
+  assertRecordOwners(claims, affectedAreas, root, repository);
+  const removed = (damagedClaim) => isPruned(damagedClaim.dir) || damagedClaim.rel !== void 0 && files.some((file) => file.rel === damagedClaim.rel);
+  for (const damagedClaim of damaged) {
+    if (removed(damagedClaim)) problems.push(damagedClaim.message);
+  }
+  for (const { dir } of removals) problems.push(...missingVersionChildren(docs, dir, plannedDirs));
+  if (problems.length > 0) throw new FatalError([...new Set(problems)].join("\n"));
+  for (const { dir } of removals) assertInsideRoot(root, dir);
+  for (const { rel } of files) assertInsideRoot(root, rel);
+  for (const { dir } of removals) assertNoSymlinkTree(docs, dir);
+  return {
+    removals,
+    files,
+    warnings,
+    plannedDirs,
+    isPruned,
+    hasWork: removals.length > 0 || files.length > 0
+  };
+}
+function applyPrune(docs, plan, root) {
+  const scope = docsRoot(root);
+  const paths = [];
+  for (const { dir } of plan.removals) {
+    assertInsideRoot(root, dir);
+    assertNoSymlinkPath(docs, dir);
+    if (!lstatOrNull(path10.join(docs, dir))?.isDirectory()) continue;
+    clearArea(docs, dir, plan.plannedDirs);
+    if (fs8.readdirSync(path10.join(docs, dir)).length === 0) fs8.rmdirSync(path10.join(docs, dir));
+    paths.push(dir);
+  }
+  for (const { rel } of plan.files) {
+    assertInsideRoot(root, rel);
+    assertNoSymlinkPath(docs, rel);
+    fs8.rmSync(path10.join(docs, rel), { force: true });
+    paths.push(rel);
+  }
+  for (const rel of paths) {
+    for (let dir = path10.posix.dirname(rel); scope.containsBelow(dir); dir = path10.posix.dirname(dir)) {
+      if (!lstatOrNull(path10.join(docs, dir))?.isDirectory() || fs8.readdirSync(path10.join(docs, dir)).length > 0) break;
+      fs8.rmdirSync(path10.join(docs, dir));
+    }
+  }
+  return paths;
+}
+var NO_PRUNE = {
+  removals: [],
+  files: [],
+  warnings: [],
+  plannedDirs: /* @__PURE__ */ new Set(),
+  isPruned: () => false,
+  hasWork: false
+};
+function stalePruneSummary(sourceBranch) {
+  writeSummary(`Skipped prune: the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell which docs are stale.`);
+}
+function pruneSummary(plan, branch, changed) {
+  if (plan.removals.length === 0 && plan.files.length === 0) return;
+  for (const { message } of plan.warnings) writeSummary(message);
+  const reasons = groupBy(plan.removals, (removal) => removal.reason);
+  writeSummary(changed ? `Pruned from \`${branch}\`:` : "Nothing to prune: the docs repo already matches.");
+  if (!changed) return;
+  for (const [reason, removals] of reasons) writeSummary(`- Pruned ${removals.map(({ dir }) => `\`${dir}\``).join(", ")}: ${reason}.`);
+}
+
+// src/publisher/mirror.mjs
+import fs9 from "node:fs";
+import path11 from "node:path";
+function assertAreaOwner(docs, root, dir, area, repository) {
+  const marker = markerRecordAt(docs, root, dir);
+  assertMarkerOwner(marker, area, repository);
+  assertMarkerOwner(skippedRecordAt(docs, dir), area, repository);
+  return marker;
+}
 function pushChangedFiles(source, before, after) {
   if (!before || !isAncestor(source, before, after)) return null;
   const result = gitStatus(source, ["diff", "--no-renames", "--name-only", "-z", `${before}..${after}`]);
@@ -33639,22 +33931,22 @@ function pushChangedFiles(source, before, after) {
   return result.stdout.split("\0").filter(Boolean);
 }
 function matchesPush(entry, changed) {
-  return entry.paths.some((pattern) => changed.some((file) => matchesGlob(path8.posix.normalize(pattern), file)));
+  return entry.paths.some((pattern) => changed.some((file) => matchesGlob(path11.posix.normalize(pattern), file)));
 }
 function planMirrors({ source, root, repository, entries, sourceRevision, sourceBranch }) {
   const date = commitDate(source, sourceRevision);
   return entries.map((entry) => {
     runBuild(entry, source, "the source checkout");
-    const areaDir = path8.posix.join(root, entry.area);
+    const areaDir = path11.posix.join(root, entry.area);
     const files = /* @__PURE__ */ new Map();
     const rules = /* @__PURE__ */ new Map();
     put(files, `${areaDir}/.meta.json`, metaFile({ source: repository, sourceRevision, sourceBranch, date }));
     rules.set(`${areaDir}/.meta.json`, "the publisher");
     for (const rule of entry.collect) {
       for (const file of collectFiles(source, rule)) {
-        const rel = path8.posix.join(areaDir, file.to);
-        const from = path8.relative(source, file.from);
-        assertCollectable(rel, from);
+        const rel = path11.posix.join(areaDir, file.to);
+        const from = path11.relative(source, file.from);
+        assertCollectable(rel, from, void 0, areaDir);
         put(files, rel, { content: file.content });
         rules.set(rel, `collect "${rule.from}" to "${rule.to}"`);
       }
@@ -33665,13 +33957,13 @@ function planMirrors({ source, root, repository, entries, sourceRevision, source
 }
 function findVersionMetadata(docs, root, area) {
   const walk = (dirRel) => {
-    for (const name of fs8.readdirSync(path8.join(docs, dirRel)).sort()) {
+    for (const name of fs9.readdirSync(path11.join(docs, dirRel)).sort()) {
       const rel = `${dirRel}/${name}`;
-      const stat2 = lstatOrNull(path8.join(docs, rel));
+      const stat2 = lstatOrNull(path11.join(docs, rel));
       if (!stat2) continue;
       if (stat2.isDirectory()) {
         const marker = `${rel}/.meta.json`;
-        if (lstatOrNull(path8.join(docs, marker))?.isFile()) {
+        if (lstatOrNull(path11.join(docs, marker))?.isFile()) {
           if (markerRecordAt(docs, root, rel).kind === "Version") return marker;
           continue;
         }
@@ -33684,20 +33976,23 @@ function findVersionMetadata(docs, root, area) {
     }
     return null;
   };
-  return lstatOrNull(path8.join(docs, area.areaDir))?.isDirectory() ? walk(area.areaDir) : null;
+  return lstatOrNull(path11.join(docs, area.areaDir))?.isDirectory() ? walk(area.areaDir) : null;
 }
 function planMirrorWrites({ args, repository, mirrors, releaseFiles = /* @__PURE__ */ new Map() }) {
   const docs = args.docs;
   const writable = mirrors;
-  for (const area of writable) assertMarkerOwner(markerRecordAt(docs, args.root, area.areaDir), area.area, repository);
+  for (const area of writable) assertAreaOwner(docs, args.root, area.areaDir, area.area, repository);
   const plannedFiles = new Map(releaseFiles);
   for (const area of writable) {
     for (const [rel, file] of area.files) put(plannedFiles, rel, file);
   }
   for (const area of writable) assertAreaPlacement(docs, area.areaDir, args.root, "mirror", plannedFiles);
   assertNoNestedWrites(docs, writable, args.root);
-  const scanned = scan(docs, args.root);
-  const releaseAreas = [...new Set(scanned.records.filter((record) => record.dir !== record.areaDir).map((record) => record.areaDir))];
+  const discovered = discoverAreas(docs, args.root);
+  const publishedContent = new Set(plannedFiles.keys());
+  for (const area of writable) for (const rel of area.destinations ?? []) publishedContent.add(rel);
+  const releaseAreas = [...discovered.releaseAreas({ content: publishedContent })];
+  const branches = discovered.claims.filter((claim) => claim.kind === "Branch");
   for (const area of writable) {
     const plannedVersion = [...releaseFiles].find(
       ([rel, file]) => rel.startsWith(`${area.areaDir}/`) && rel.endsWith("/.meta.json") && readMarkerRecord(file.content, rel, args.root).kind === "Version"
@@ -33708,7 +34003,7 @@ function planMirrorWrites({ args, repository, mirrors, releaseFiles = /* @__PURE
         `"${area.area}" overlaps a release Version folder at ${versionMetadata}; a mirror Area must not contain a release Area or sit inside a Version folder`
       );
     }
-    const branchArea = scanned.branches.find((branch) => branch.areaDir === area.areaDir || branch.areaDir.startsWith(`${area.areaDir}/`));
+    const branchArea = branches.find((branch) => branch.areaDir === area.areaDir || branch.areaDir.startsWith(`${area.areaDir}/`));
     if (branchArea !== void 0) {
       assertMarkerOwner(branchArea, area.area, repository);
       throw new FatalError(
@@ -33721,6 +34016,20 @@ function planMirrorWrites({ args, repository, mirrors, releaseFiles = /* @__PURE
         `refusing to publish ${area.areaDir}: it sits inside the release Area ${releaseArea}, and a Mirror Area cannot sit inside a release Area. Choose another Area.`
       );
     }
+    const claimedArea = releaseAreas.find((dir) => dir === area.areaDir);
+    if (claimedArea !== void 0) {
+      throw new FatalError(
+        `refusing to publish ${area.areaDir}: the docs mark it as a release Area, and a Mirror Area cannot sit inside a release Area. Choose another Area.`
+      );
+    }
+    const heldArea = releaseAreas.find((dir) => dir.startsWith(`${area.areaDir}/`));
+    if (heldArea !== void 0) {
+      throw new FatalError(
+        `refusing to publish ${area.areaDir}: it holds the release Area ${heldArea}, and a Mirror Area cannot sit inside a release Area. Choose another Area.`
+      );
+    }
+    const damaged = discovered.damaged.find((entry) => !publishedContent.has(entry.rel) && (entry.dir === area.areaDir || entry.dir.startsWith(`${area.areaDir}/`)));
+    if (damaged !== void 0) throw new FatalError(`refusing to publish ${area.areaDir}: ${damaged.message}`);
     if (area.destinations === null) continue;
     const planned = /* @__PURE__ */ new Set([...plannedFiles.keys(), ...area.destinations ?? []]);
     assertAreaWritable(docs, area.areaDir, planned, [area.areaDir]);
@@ -33746,8 +34055,7 @@ function prepareMirrors({ args, repository, root }) {
   const sourceRevision = git(args.source, ["rev-parse", "HEAD"]);
   const isPush = args.before !== void 0 || args.after !== void 0;
   const matched = mirrors.filter((entry) => {
-    const previous = markerRecordAt(args.docs, root, path8.posix.join(root, entry.area));
-    assertMarkerOwner(previous, entry.area, repository);
+    const previous = assertAreaOwner(args.docs, root, path11.posix.join(root, entry.area), entry.area, repository);
     const touched = isPush && previous?.sourceBranch === args["source-branch"] ? pushChangedFiles(args.source, previous.sourceRevision, sourceRevision) : null;
     return touched === null || entriesChanged(args.source, args.entries, touched) || matchesPush(entry, touched);
   });
@@ -33824,7 +34132,7 @@ function planPushAttempt({ args, repository, root, mirrors, sourceRevision, area
     }
   }
   const writable = planMirrorWrites({ args, repository, mirrors });
-  assertRecordOwners(scan(args.docs, root).records, areaFileSources.map((source) => source.areaDir), root, repository);
+  assertRecordOwners(discoverAreas(args.docs, root).claims, areaFileSources.map((source) => source.areaDir), root, repository);
   for (const { area, areaDir, branches } of shared) {
     for (const branch of branches) {
       assertBranchReplaceable(args.docs, root, branch.dir, area, repository);
@@ -33850,7 +34158,7 @@ function applyPushPlan(docs, attempt) {
 function writeRebuild(docs, { plan, branches }) {
   const written = plan === null ? [] : writeSharedArea(docs, plan);
   for (const branch of branches) {
-    fs8.rmSync(path8.join(docs, branch.dir), { recursive: true, force: true });
+    fs9.rmSync(path11.join(docs, branch.dir), { recursive: true, force: true });
     for (const [rel, file] of branch.files) writeFile2(docs, rel, file);
     written.push(branch.dir);
   }
@@ -33868,7 +34176,7 @@ function publishPushUpdates({ args, repository, root }) {
   const { mirrors } = prepareMirrors({ args, repository, root });
   const sourceRevision = git(args.source, ["rev-parse", "HEAD"]);
   const touched = pushChangedFiles(args.source, args.before, args.after);
-  const areaFileSources = touched === null ? [] : entries.filter((entry) => entry.mode === "release" && (entry.areaFiles.length > 0 || entry.publishSourceBranch === true)).map((entry) => ({ entry, areaDir: path8.posix.join(root, entry.area), changed: touched, state: null }));
+  const areaFileSources = touched === null ? [] : entries.filter((entry) => entry.mode === "release" && (entry.areaFiles.length > 0 || entry.publishSourceBranch === true)).map((entry) => ({ entry, areaDir: path11.posix.join(root, entry.area), changed: touched, state: null }));
   if (mirrors.length === 0 && areaFileSources.length === 0) return { changed: false, commitSha: null };
   let attempt;
   const { changed, commitSha } = publishWithRetry({
@@ -33897,29 +34205,16 @@ function publishPushUpdates({ args, repository, root }) {
 
 // src/publisher/reconcile.mjs
 function readReconcileArea(source, docs, root, entry, prune) {
-  const areaDir = path9.posix.join(root, entry.area);
-  const tagNames = readTagNames(source, entry);
+  const areaDir = path12.posix.join(root, entry.area);
+  const targeting = versionTargeting({ source, root, entry });
   const tags = git(source, ["tag", "--list"]).split("\n").filter(Boolean);
   const packages = [];
   for (const tag of tags) {
     const release = matchTag(tag);
     if (!release || entry.packages !== void 0 !== Boolean(release.name)) continue;
-    const name = release.name ? folderForTagName(tagNames, release.name) : null;
-    let note = null;
-    if (name) {
-      const folder = path9.posix.join(entry.packages, name);
-      if (!hasTreeAt(source, "HEAD", folder)) note = "retired";
-      else if (!hasTreeAt(source, `refs/tags/${tag}`, folder)) note = "no folder";
-    }
-    packages.push({
-      name,
-      version: release.version,
-      prerelease: release.prerelease,
-      tag,
-      versionDir: path9.posix.join(areaDir, ...name ? [name] : [], release.version),
-      files: null,
-      note
-    });
+    const target = targeting.forTag(release);
+    const note = target.folder !== null && !hasTreeAt(source, "HEAD", target.folder) ? "retired" : null;
+    packages.push({ ...target, prerelease: release.prerelease, tag, files: null, note });
   }
   return {
     entry,
@@ -33933,22 +34228,39 @@ function cleanSource(source) {
   git(source, ["reset", "--quiet", "--hard", "HEAD"]);
   git(source, ["clean", "-fdqx"]);
 }
-function noteUnpublishable(source, area, pkg) {
-  if (pkg.note) return;
-  if (!tagExists(source, pkg.tag)) pkg.note = "missing tag";
-  else if (pkg.prerelease && !area.entry.prereleases) pkg.note = "prerelease";
+function resolveTag(source, area, pkg) {
+  const revision = tagCommit(source, pkg.tag);
+  if (pkg.note === "retired") {
+    pkg.sourceRevision = revision ?? void 0;
+    return;
+  }
+  if (revision !== pkg.sourceRevision) {
+    if (pkg.sourceRevision !== void 0) {
+      pkg.files = null;
+      pkg.reason = void 0;
+      if (pkg.note === "content") pkg.note = void 0;
+    }
+    pkg.sourceRevision = revision ?? void 0;
+  }
+  if (revision === null) {
+    pkg.note = "missing tag";
+    return;
+  }
+  if (pkg.folder !== null && !hasTreeAt(source, revision, pkg.folder)) pkg.note = "no folder";
+  else if (pkg.note === "no folder") pkg.note = void 0;
+  if (!pkg.note && pkg.prerelease && !area.entry.prereleases) pkg.note = "prerelease";
 }
-function readFromTag(source, root, area, pkg, repository) {
+function readFromTag(source, area, pkg, repository) {
   cleanSource(source);
-  git(source, ["checkout", "--quiet", "--detach", `refs/tags/${pkg.tag}`]);
+  git(source, ["checkout", "--quiet", "--detach", pkg.sourceRevision]);
   try {
     pkg.files = planVersion({
       source,
-      root,
       entry: area.entry,
-      release: { name: pkg.name, version: pkg.version },
+      target: pkg,
       repository,
       tag: pkg.tag,
+      sourceRevision: pkg.sourceRevision,
       date: tagDate(source, pkg.tag)
     }).files;
   } catch (error2) {
@@ -33957,22 +34269,23 @@ function readFromTag(source, root, area, pkg, repository) {
     pkg.reason = error2.message;
   }
 }
-function readTags(source, root, pending, repository) {
+function readTags(source, pending, repository) {
   const unread = pending.filter(({ pkg }) => !pkg.files && !pkg.note);
   if (unread.length === 0) return;
   const start = gitStatus(source, ["symbolic-ref", "--quiet", "--short", "HEAD"]).stdout.trim() || git(source, ["rev-parse", "HEAD"]);
   try {
-    for (const { area, pkg } of unread) readFromTag(source, root, area, pkg, repository);
+    for (const { area, pkg } of unread) readFromTag(source, area, pkg, repository);
   } finally {
     cleanSource(source);
-    git(source, ["checkout", "--quiet", "--force", start, "--"]);
+    git(source, ["checkout", "--quiet", "--force", start]);
   }
 }
 function versionsToWrite(docs, area, { source, repository, root, sourceMoved, report }) {
   const pending = [];
+  const stamps = [];
   for (const pkg of area.packages) {
     assertNoSymlinkPath(docs, pkg.versionDir);
-    const existing = lstatOrNull(path9.join(docs, pkg.versionDir));
+    const existing = lstatOrNull(path12.join(docs, pkg.versionDir));
     let metadata;
     try {
       metadata = markerRecordAt(docs, root, pkg.versionDir);
@@ -33985,23 +34298,34 @@ function versionsToWrite(docs, area, { source, repository, root, sourceMoved, re
         throw new FatalError(`refusing to republish \`${pkg.versionDir}\` from \`${pkg.tag}\`: it holds the Version of \`${metadata.tag}\``);
       }
       if (!tagExists(source, metadata.tag)) continue;
-      if (metadata.specHash === specHash(area.entry)) {
-        report.kept.push(pkg.versionDir);
+      const specChanged = metadata.specHash !== specHash(area.entry);
+      const revisionChanged = metadata.sourceRevision !== void 0 && metadata.sourceRevision !== pkg.sourceRevision;
+      if (!specChanged && !revisionChanged) {
+        if (metadata.sourceRevision === void 0 && !sourceMoved && pkg.sourceRevision !== void 0) {
+          const rel = `${pkg.versionDir}/.meta.json`;
+          const fields = JSON.parse(fs10.readFileSync(path12.join(docs, rel), "utf8"));
+          stamps.push({ rel, file: metaFile({ ...fields, sourceRevision: pkg.sourceRevision }) });
+          report.stamped.push(pkg.versionDir);
+        } else {
+          report.kept.push(pkg.versionDir);
+        }
         continue;
       }
       if (sourceMoved) {
-        report.specStale.push(pkg.versionDir);
+        if (specChanged) report.versionStale.push(pkg.versionDir);
+        else report.buildStale.push(pkg.versionDir);
         continue;
       }
+      pkg.reason = specChanged ? "spec" : "moved";
     } else if (existing) continue;
     pending.push({ area, pkg, existing });
   }
-  return pending;
+  return { pending, stamps };
 }
-function areaHasUnmergedRelease(source, docs, area) {
-  const tags = readTagNames(source, area.entry);
+function areaHasUnmergedRelease(source, docs, root, area) {
+  const targeting = versionTargeting({ source, root, entry: area.entry });
   return existingVersionFolders(docs, area.areaDir, area.entry).some(({ name, version }) => {
-    const tag = tagForVersionFolder(tags, name, version);
+    const tag = targeting.tagFor(name, version);
     return tagExists(source, tag) && !isAncestor(source, `refs/tags/${tag}`, "HEAD");
   });
 }
@@ -34012,61 +34336,102 @@ function reconcileSummary({ names, docsBranch, sourceBranch, changed, report }) 
   ] : [];
   if (report.published.length > 0) lines.push(`- Published ${list(report.published)}.`);
   if (report.republished.length > 0) lines.push(`- Republished ${list(report.republished)}: spec changed.`);
+  if (report.moved.length > 0) lines.push(`- Republished ${list(report.moved)}: its tag points at a different commit.`);
   if (report.branches.some((branch) => branch.changed)) {
     lines.push(`- Published the Branch Version folders ${list(report.branches.filter((branch) => branch.changed).map((branch) => branch.dir))}.`);
   }
   if (report.kept.length > 0) {
     lines.push(`- Kept ${list(report.kept)}: specHash matches the current entry.`);
   }
+  if (report.stamped.length > 0) {
+    lines.push(`- Recorded the source revision in ${list(report.stamped)}.`);
+  }
   if (report.untagged.length > 0) {
     lines.push(`- Kept ${list(report.untagged)}: no matching tag in this repo to republish ${report.untagged.length === 1 ? "it" : "them"} from.`);
   }
   return [...lines, ...skippedReconcileLines({ sourceBranch, ...report })].join("\n");
 }
-function skippedReconcileLines({ sourceBranch, areaFilesSkipped, skipped, specStale = [], branchStale = [] }) {
+function previouslySkippedLine(reused) {
+  return `- ${reused.length} previously skipped ${reused.length === 1 ? "tag" : "tags"} unchanged.`;
+}
+function skippedReconcileLines({
+  sourceBranch,
+  areaFilesSkipped,
+  skips = [],
+  versionStale = [],
+  buildStale = [],
+  branchStale = [],
+  collapse = false
+}) {
+  const reused = skips.filter((skip) => skip.reused);
+  const fresh = skips.filter((skip) => !skip.reused);
   const lines = areaFilesSkipped.map(({ dir, reason }) => `- Skipped Area files for \`${dir}\`: ${reason}.`);
-  if (specStale.length > 0) {
-    lines.push(`- Skipped ${list(specStale)}: the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell whether a newer spec is already published.`);
+  if (versionStale.length > 0) {
+    lines.push(`- Skipped ${list(versionStale)}: the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell whether a newer spec is already published.`);
+  }
+  if (buildStale.length > 0) {
+    lines.push(`- Skipped ${list(buildStale)}: the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell whether a newer build of the tag is already published.`);
   }
   if (branchStale.length > 0) {
     lines.push(`- Skipped ${list(branchStale)}: the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell whether a newer build is already published.`);
   }
-  const retired = skipped.filter((pkg) => pkg.note === "retired").map((pkg) => pkg.tag);
-  const noFolder = skipped.filter((pkg) => pkg.note === "no folder").map((pkg) => pkg.tag);
-  if (retired.length > 0) lines.push(`- Skipped ${list(retired)}: the package folder is gone from \`${sourceBranch}\`, so the package is retired.`);
-  if (noFolder.length > 0) lines.push(`- Skipped ${list(noFolder)}: the package folder does not exist at that tag.`);
-  const missing = skipped.filter((pkg) => pkg.note === "missing tag").map((pkg) => pkg.tag);
-  const prereleases = skipped.filter((pkg) => pkg.note === "prerelease").map((pkg) => pkg.tag);
-  if (missing.length > 0) lines.push(`- Skipped ${list(missing)}: no such tag.`);
+  if (reused.length > 0) lines.push(previouslySkippedLine(reused));
+  const tags = [];
+  const withSkip = (reason) => fresh.filter((skip) => skip.skip === reason).map(({ tag }) => tag);
+  const retired = withSkip("retired");
+  const noFolder = withSkip("no folder");
+  if (retired.length > 0) tags.push(`- Skipped ${list(retired)}: the package folder is gone from \`${sourceBranch}\`, so the package is retired.`);
+  if (noFolder.length > 0) tags.push(`- Skipped ${list(noFolder)}: the package folder does not exist at that tag.`);
+  const missing = withSkip("missing tag");
+  const prereleases = withSkip("prerelease");
+  if (missing.length > 0) tags.push(`- Skipped ${list(missing)}: no such tag.`);
   if (prereleases.length > 0) {
-    lines.push(`- Skipped ${list(prereleases)}: a prerelease, and the entry does not publish prereleases.`);
+    tags.push(`- Skipped ${list(prereleases)}: a prerelease, and the entry does not publish prereleases.`);
   }
-  const unfit = groupBy(skipped.filter((pkg) => pkg.note === "content"), (pkg) => pkg.reason);
-  for (const [reason, packages] of unfit) {
-    lines.push(`- Skipped ${list(packages.map((pkg) => pkg.tag))}: its content does not fit the entry (${reason}).`);
+  const unfit = groupBy(fresh.filter((skip) => skip.skip === "content"), (skip) => skip.detail);
+  for (const [detail, skipsOfDetail] of unfit) {
+    tags.push(`- Skipped ${list(skipsOfDetail.map(({ tag }) => tag))}: its content does not fit the entry (${detail}).`);
+  }
+  if (collapse && fresh.length > 10) {
+    lines.push(`<details><summary>Skipped ${fresh.length} tags</summary>`, "", ...tags, "", "</details>");
+  } else {
+    lines.push(...tags);
   }
   return lines;
 }
-function planReconcileWrites(docs, areas, { source, repository, root, sourceBranch, sourceMoved = false }) {
-  const report = { published: [], republished: [], branches: [], kept: [], untagged: [], skipped: [], areaFilesSkipped: [], specStale: [], branchStale: [] };
+function planReconcileWrites(docs, areas, { source, repository, root, sourceBranch, sourceMoved = false, writeSkippedTags = false }) {
+  const report = { published: [], republished: [], moved: [], branches: [], kept: [], stamped: [], untagged: [], skips: [], areaFilesSkipped: [], versionStale: [], buildStale: [], branchStale: [] };
   const writes = /* @__PURE__ */ new Map();
   const written = [];
+  const removals = [];
+  for (const area of areas) {
+    for (const pkg of area.packages) resolveTag(source, area, pkg);
+  }
   const revision = areas.some((area) => area.entry.publishSourceBranch === true) ? git(source, ["rev-parse", "HEAD"]) : null;
-  const pending = new Map(areas.map((area) => [area, versionsToWrite(docs, area, { source, repository, root, sourceMoved, report })]));
-  readTags(source, root, [...pending.values()].flat(), repository);
+  const planned = new Map(areas.map((area) => [area, versionsToWrite(docs, area, { source, repository, root, sourceMoved, report })]));
+  for (const area of areas) {
+    const plan = planned.get(area);
+    plan.skips = planAreaSkips({ docs, areaDir: area.areaDir, entry: area.entry, repository });
+    plan.skips.reuse(plan.pending);
+  }
+  readTags(source, [...planned.values()].flatMap(({ pending }) => pending), repository);
   for (const area of areas) {
     const files = /* @__PURE__ */ new Map();
     const versions = [];
     written.push({ area: area.entry.area, areaDir: area.areaDir, files, versions });
-    for (const { pkg, existing } of pending.get(area)) {
+    const { pending, stamps, skips } = planned.get(area);
+    for (const { rel, file } of stamps) put(files, rel, file);
+    for (const { pkg, existing } of pending) {
       if (!pkg.files) {
-        report.skipped.push(pkg);
+        skips.record(pkg);
         continue;
       }
       for (const [rel, file] of pkg.files) put(files, rel, file);
       versions.push(pkg);
-      if (existing) report.republished.push(pkg.versionDir);
-      else report.published.push(pkg.versionDir);
+      if (existing) {
+        if (pkg.reason === "moved") report.moved.push(pkg.versionDir);
+        else report.republished.push(pkg.versionDir);
+      } else report.published.push(pkg.versionDir);
     }
     for (const folder of existingVersionFolders(docs, area.areaDir, area.entry)) {
       let owner;
@@ -34095,18 +34460,16 @@ function planReconcileWrites(docs, areas, { source, repository, root, sourceBran
         assertBranchReplaceable(docs, root, branch.dir, area.entry.area, repository);
         assertAreaWritable(docs, branch.dir, /* @__PURE__ */ new Set(), [branch.dir]);
         const marker = `${branch.dir}/.meta.json`;
-        const existing = lstatOrNull(path9.join(docs, marker))?.isFile() ? fs9.readFileSync(path9.join(docs, marker), "utf8") : null;
+        const existing = lstatOrNull(path12.join(docs, marker))?.isFile() ? fs10.readFileSync(path12.join(docs, marker), "utf8") : null;
         for (const [rel, file] of branch.files) put(files, rel, file);
         report.branches.push({ dir: branch.dir, existed: existing !== null, changed: existing !== branch.files.get(marker).content });
       }
     }
     let skipReason;
-    if (area.areaFiles.size > 0) {
-      if (snapshotAreaState(docs, root, area.areaDir, area.entry) !== area.state) {
-        skipReason = "the Area's shared files changed since Reconcile started";
-      } else if (areaHasUnmergedRelease(source, docs, area)) {
-        skipReason = "a published version's tag is not an ancestor of the manual checkout";
-      }
+    if (snapshotAreaState(docs, root, area.areaDir, area.entry) !== area.state) {
+      skipReason = "the Area's shared files changed since Reconcile started";
+    } else if (area.areaFiles.size > 0 && areaHasUnmergedRelease(source, docs, root, area)) {
+      skipReason = "a published version's tag is not an ancestor of the manual checkout";
     }
     if (!skipReason && sourceMoved) {
       skipReason = `the source branch \`${sourceBranch}\` moved past the checkout, so this run cannot tell whether newer ones are already published`;
@@ -34117,11 +34480,17 @@ function planReconcileWrites(docs, areas, { source, repository, root, sourceBran
     } else {
       for (const [rel, file] of area.areaFiles) put(files, rel, file);
     }
+    if (writeSkippedTags && !skipReason) {
+      const change = skips.change();
+      if (change?.file) put(files, change.rel, change.file);
+      else if (change?.remove) removals.push(change.rel);
+    }
+    report.skips.push(...skips.outcomes());
     for (const [rel, file] of files) put(writes, rel, file);
   }
   assertNoNestedWrites(docs, written, root);
   for (const rel of writes.keys()) assertNoSymlinkPath(docs, rel);
-  return { areas: written, files: writes, report };
+  return { areas: written, files: writes, removals, report };
 }
 function planReconcileSharedAreas({ args, repository, root, areas, reconcile, checkPlacement }) {
   const shared = [];
@@ -34140,7 +34509,7 @@ function planReconcileSharedAreas({ args, repository, root, areas, reconcile, ch
           branch: args.branch,
           docsRepository: args["docs-repository"],
           versions: reconcile.areas[index].versions,
-          areaFiles: new Map([...reconcile.files].filter(([rel]) => path9.posix.dirname(rel) === area.areaDir))
+          areaFiles: new Map([...reconcile.files].filter(([rel]) => path12.posix.dirname(rel) === area.areaDir))
         })
       });
     } catch (error2) {
@@ -34168,12 +34537,12 @@ function prepareReconcile({ args, repository, root, prune }) {
     writeSummary("No release entries to reconcile. Add entries to `.github/docs_publisher.yaml`.");
     return [];
   }
-  const fetch2 = gitRemote(args.source, ["fetch", "--quiet", "--force", "--tags", "origin"]);
+  const fetch2 = gitRemote(args.source, ["fetch", "--quiet", "--force", "--tags", "--prune", "--prune-tags", "origin"]);
   if (fetch2.status !== 0) throw new FatalError(`git fetch failed: ${fetch2.stderr.trim()}`);
   const areas = entries.map((entry) => readReconcileArea(args.source, args.docs, root, entry, prune));
   rejectMergedVersionFolders(areas);
   for (const area of areas) {
-    for (const pkg of area.packages) noteUnpublishable(args.source, area, pkg);
+    for (const pkg of area.packages) resolveTag(args.source, area, pkg);
   }
   return areas;
 }
@@ -34214,7 +34583,8 @@ function publishReconcile({ args, repository, root }) {
         repository,
         root,
         sourceBranch: args["source-branch"],
-        sourceMoved
+        sourceMoved,
+        writeSkippedTags: true
       });
       const writable = planMirrorWrites({ args, repository, mirrors, releaseFiles: reconcile.files });
       const writes = [...reconcile.areas, ...writable];
@@ -34235,14 +34605,21 @@ function publishReconcile({ args, repository, root }) {
           ...area.files.keys(),
           ...shared[index].files.keys(),
           ...shared[index].removals,
-          ...[...reconcile.report.republished, ...reconcile.report.branches.map((branch) => branch.dir)].filter((dir) => dir.startsWith(`${area.areaDir}/`))
+          ...reconcile.removals.filter((rel) => rel.startsWith(`${area.areaDir}/`)),
+          ...[...reconcile.report.republished, ...reconcile.report.moved, ...reconcile.report.branches.map((branch) => branch.dir)].filter((dir) => dir.startsWith(`${area.areaDir}/`))
         ]
       }));
       writeMirrors(args.docs, writable);
-      for (const dir of reconcile.report.republished) fs9.rmSync(path9.join(args.docs, dir), { recursive: true, force: true });
-      for (const branch of reconcile.report.branches) fs9.rmSync(path9.join(args.docs, branch.dir), { recursive: true, force: true });
+      for (const rel of reconcile.removals) fs10.rmSync(path12.join(args.docs, rel), { force: true });
+      for (const dir of [...reconcile.report.republished, ...reconcile.report.moved]) fs10.rmSync(path12.join(args.docs, dir), { recursive: true, force: true });
+      for (const branch of reconcile.report.branches) fs10.rmSync(path12.join(args.docs, branch.dir), { recursive: true, force: true });
       for (const [rel, file] of reconcile.files) writeFile2(args.docs, rel, file);
-      return [...files.keys(), ...shared.flatMap((plan) => writeSharedArea(args.docs, plan)), ...pruned];
+      return [
+        ...reconcile.removals,
+        ...files.keys(),
+        ...shared.flatMap((plan) => writeSharedArea(args.docs, plan)),
+        ...pruned
+      ];
     }
   });
   pruneSummary(changed ? committed.prune : prune, args.branch, changed);
@@ -34261,24 +34638,24 @@ function publishReconcile({ args, repository, root }) {
 }
 
 // src/publisher/plan.mjs
-import fs10 from "node:fs";
+import fs11 from "node:fs";
 import os5 from "node:os";
-import path10 from "node:path";
+import path13 from "node:path";
 var PLAN_MARKER = "<!-- docs-publisher-plan -->";
 var IRRELEVANT_MARKER = "<!-- docs-publisher-plan-irrelevant -->";
 var MARKER = PLAN_MARKER;
 var IRRELEVANT = IRRELEVANT_MARKER;
 function writeIrrelevantPlan(file) {
-  fs10.writeFileSync(file, `${MARKER}
+  fs11.writeFileSync(file, `${MARKER}
 ${IRRELEVANT}
 ## Docs publisher plan
 
 This pull request no longer changes docs publishing.
 `);
 }
-function planRemovals({ args, prune, observed, add }) {
+function planRemovals({ args, prune, versions, branches, add }) {
   const changedAreas = /* @__PURE__ */ new Set();
-  const branchDirs = new Set(observed.branches.map((branch) => branch.dir));
+  const branchDirs = new Set(branches.map((branch) => branch.dir));
   for (const { dir, kind, reason, areaDir: branchArea } of prune.removals) {
     const areaDir = branchArea;
     if (!areaDir) continue;
@@ -34289,12 +34666,12 @@ function planRemovals({ args, prune, observed, add }) {
     } else if (branchDirs.has(dir)) {
       add(areaDir, `- Delete Branch Version folder \`${dir.slice(areaDir.length + 1)}\`: ${reason}.`);
     } else {
-      for (const version of observed.versions.filter((version2) => version2.dir.startsWith(`${dir}/`) || version2.dir === dir)) {
+      for (const version of versions.filter((version2) => version2.dir.startsWith(`${dir}/`) || version2.dir === dir)) {
         add(areaDir, `- Delete version \`${version.dir.slice(areaDir.length + 1)}\`: ${reason}.`);
       }
     }
   }
-  for (const version of observed.versions) {
+  for (const version of versions) {
     if (prune.isPruned(version.dir) && !tagExists(args.source, version.tag)) {
       add(version.areaDir, `- Warning: deleting version \`${version.dir.slice(version.areaDir.length + 1)}\`: no tag exists to rebuild it from.`);
     }
@@ -34306,7 +34683,7 @@ function mirrorDestinations({ args, areaDir, entry }) {
   const destinations = /* @__PURE__ */ new Set([`${areaDir}/.meta.json`]);
   for (const rule of entry.collect) {
     try {
-      for (const file of collectFiles(args.source, rule)) destinations.add(path10.posix.join(areaDir, file.to));
+      for (const file of collectFiles(args.source, rule)) destinations.add(path13.posix.join(areaDir, file.to));
     } catch (error2) {
       if (error2 instanceof TagContentError) return null;
       throw error2;
@@ -34316,8 +34693,8 @@ function mirrorDestinations({ args, areaDir, entry }) {
 }
 function mirrorPlaceholders({ args, repository, root, entries, sourceRevision, changedAreas, add }) {
   return entries.filter((entry) => entry.mode === "mirror").map((entry) => {
-    const areaDir = path10.posix.join(root, entry.area);
-    if (!changedAreas.has(areaDir) && !lstatOrNull(path10.join(args.docs, areaDir))) add(areaDir, "- Add Mirror Area.");
+    const areaDir = path13.posix.join(root, entry.area);
+    if (!changedAreas.has(areaDir) && !lstatOrNull(path13.join(args.docs, areaDir))) add(areaDir, "- Add Mirror Area.");
     return {
       area: entry.area,
       areaDir,
@@ -34339,13 +34716,17 @@ function recordReleaseChanges({ args, areas, report, add }) {
     for (const dir of report.republished.filter((dir2) => dir2.startsWith(`${area.areaDir}/`))) {
       add(area.areaDir, `- Republish version \`${dir.slice(area.areaDir.length + 1)}\`: specHash changed.`);
     }
+    for (const dir of report.moved.filter((dir2) => dir2.startsWith(`${area.areaDir}/`))) {
+      add(area.areaDir, `- Republish version \`${dir.slice(area.areaDir.length + 1)}\`: its tag points at a different commit.`);
+    }
     for (const branch of report.branches.filter((branch2) => branch2.changed && branch2.dir.startsWith(`${area.areaDir}/`))) {
       add(area.areaDir, `- ${branch.existed ? "Refresh" : "Add"} Branch Version folder \`${branch.dir.slice(area.areaDir.length + 1)}\`.`);
     }
     for (const line of skippedReconcileLines({
       sourceBranch: args["source-branch"],
       areaFilesSkipped: report.areaFilesSkipped.filter(({ dir }) => dir === area.areaDir),
-      skipped: report.skipped.filter((pkg) => area.packages.includes(pkg))
+      skips: report.skips.filter((skip) => skip.areaDir === area.areaDir),
+      collapse: true
     })) add(area.areaDir, line);
   }
 }
@@ -34354,21 +34735,21 @@ function sharedFileChanges({ docs, areaDir, entry, plan }) {
   const generated = [];
   const names = generatedAreaNames(entry);
   const record = (rel, verb) => {
-    const label = path10.posix.dirname(rel) === areaDir && !names.has(path10.posix.basename(rel)) ? "Area file" : "shared file";
+    const label = path13.posix.dirname(rel) === areaDir && !names.has(path13.posix.basename(rel)) ? "Area file" : "shared file";
     const line = `- ${verb} ${label} \`${rel.slice(areaDir.length + 1)}\`.`;
     if (label === "Area file") areaFiles.push(line);
     else generated.push(line);
   };
   for (const [rel, file] of plan.files) {
-    const absolute = path10.join(docs, rel);
+    const absolute = path13.join(docs, rel);
     const stat2 = lstatOrNull(absolute);
     const wanted = Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content);
     if (!stat2) record(rel, "Add");
-    else if (!stat2.isFile() || Buffer.compare(fs10.readFileSync(absolute), wanted) !== 0) record(rel, "Replace");
+    else if (!stat2.isFile() || Buffer.compare(fs11.readFileSync(absolute), wanted) !== 0) record(rel, "Replace");
   }
   const written = new Set(plan.files.keys());
   for (const rel of plan.removals) {
-    const absolute = path10.join(docs, rel);
+    const absolute = path13.join(docs, rel);
     const stat2 = lstatOrNull(absolute);
     if (!stat2 || written.has(rel)) continue;
     const rewritten = [...written].some((file) => file.startsWith(`${rel}/`));
@@ -34376,9 +34757,9 @@ function sharedFileChanges({ docs, areaDir, entry, plan }) {
       record(rel, "Delete");
       continue;
     }
-    for (const child of fs10.readdirSync(absolute, { recursive: true }).sort()) {
-      const childRel = path10.posix.join(rel, child.split(path10.sep).join("/"));
-      if (!written.has(childRel) && !lstatOrNull(path10.join(docs, childRel)).isDirectory()) record(childRel, "Delete");
+    for (const child of fs11.readdirSync(absolute, { recursive: true }).sort()) {
+      const childRel = path13.posix.join(rel, child.split(path13.sep).join("/"));
+      if (!written.has(childRel) && !lstatOrNull(path13.join(docs, childRel)).isDirectory()) record(childRel, "Delete");
     }
   }
   return { areaFiles, generated };
@@ -34395,15 +34776,17 @@ function recordSharedChanges({ docs, shared, changes, add }) {
 }
 function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
   assertNoSymlinkPath(args.docs, root);
-  const observed = scan(args.docs, root);
+  const observed = discoverAreas(args.docs, root);
+  const versions = observed.claims.filter((claim) => claim.kind === "Version");
+  const branches = observed.claims.filter((claim) => claim.kind === "Branch");
   const prune = planPrune({ docs: args.docs, source: args.source, root, repository, entries });
   const areas = prepareReconcile({ args, repository, root, prune });
-  if (lstatOrNull(path10.join(args.docs, root))) {
-    fs10.cpSync(path10.join(args.docs, root), path10.join(snapshot, root), {
+  if (lstatOrNull(path13.join(args.docs, root))) {
+    fs11.cpSync(path13.join(args.docs, root), path13.join(snapshot, root), {
       recursive: true,
       verbatimSymlinks: true,
       // With a docs root of `.` the plan copies the checkout itself; `.git` is Git's, and the plan never reads it.
-      filter: (source) => path10.basename(source) !== ".git"
+      filter: (source) => path13.basename(source) !== ".git"
     });
   }
   applyPrune(snapshot, prune, root);
@@ -34417,7 +34800,7 @@ function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
     if (!changes.has(areaDir)) changes.set(areaDir, []);
     changes.get(areaDir).push(line);
   };
-  const changedAreas = planRemovals({ args, prune, observed, add });
+  const changedAreas = planRemovals({ args, prune, versions, branches, add });
   const sourceRevision = git(args.source, ["rev-parse", "HEAD"]);
   const mirrors = mirrorPlaceholders({ args, repository, root, entries, sourceRevision, changedAreas, add });
   const writable = planMirrorWrites({ args: { ...args, docs: snapshot }, repository, mirrors, releaseFiles: reconcile.files });
@@ -34434,7 +34817,7 @@ function assemblePlan({ args, repository, root, entries, snapshot, changes }) {
     checkPlacement: (area) => assertAreaPlacement(snapshot, area.areaDir, root, "release", plannedFiles)
   });
   if (problems.length) throw new FatalError([...new Set(problems)].join("\n"));
-  return recordSharedChanges({ docs: args.docs, shared, changes, add }) || prune.hasWork || reconcile.report.published.length > 0 || reconcile.report.republished.length > 0 || reconcile.report.branches.some((branch) => branch.changed) || mirrors.some((mirror) => !lstatOrNull(path10.join(args.docs, mirror.areaDir)));
+  return recordSharedChanges({ docs: args.docs, shared, changes, add }) || prune.hasWork || reconcile.report.published.length > 0 || reconcile.report.republished.length > 0 || reconcile.report.moved.length > 0 || reconcile.report.branches.some((branch) => branch.changed) || mirrors.some((mirror) => !lstatOrNull(path13.join(args.docs, mirror.areaDir)));
 }
 function planReconcile({ args, repository, root }) {
   const scope = docsRoot(root);
@@ -34445,13 +34828,13 @@ function planReconcile({ args, repository, root }) {
   try {
     const entries = readEntries(args.entries, args["source-branch"]);
     const changed = git(args.source, ["diff", "--no-renames", "--name-only", "-z", `${args.before}...${args.after}`]).split("\0").filter(Boolean);
-    const packages = entries.filter((entry) => entry.mode === "release" && entry.packages !== void 0).map((entry) => path10.posix.normalize(entry.packages).replace(/\/$/, ""));
+    const packages = entries.filter((entry) => entry.mode === "release" && entry.packages !== void 0).map((entry) => path13.posix.normalize(entry.packages).replace(/\/$/, ""));
     if (!entriesChanged(args.source, args.entries, changed) && !packages.some((folder) => changed.some((file) => folder === "." || file.startsWith(`${folder}/`)))) {
       writeSummary("Skipped plan: no changed entries file or release package folder.");
       writeIrrelevantPlan(args["plan-file"]);
       return { changed: false, commitSha: null };
     }
-    snapshot = fs10.mkdtempSync(path10.join(process.env.RUNNER_TEMP || os5.tmpdir(), "docs-publisher-plan-"));
+    snapshot = fs11.mkdtempSync(path13.join(process.env.RUNNER_TEMP || os5.tmpdir(), "docs-publisher-plan-"));
     hasChanges = assemblePlan({ args, repository, root, entries, snapshot, changes });
   } catch (error2) {
     if (!(error2 instanceof FatalError)) throw error2;
@@ -34461,7 +34844,7 @@ function planReconcile({ args, repository, root }) {
     }
     problems.push(...message.split("\n").filter(Boolean));
   } finally {
-    if (snapshot) fs10.rmSync(snapshot, { recursive: true, force: true });
+    if (snapshot) fs11.rmSync(snapshot, { recursive: true, force: true });
   }
   const lines = [MARKER, "## Docs publisher plan", "", "Mirror content changes are not listed; mirror builds do not run in plan mode."];
   for (const [areaDir, items] of [...changes].sort(([a], [b]) => a.localeCompare(b))) {
@@ -34469,7 +34852,7 @@ function planReconcile({ args, repository, root }) {
   }
   if (!hasChanges && problems.length === 0) lines.push("", "No changes to add, republish, delete or replace.");
   if (problems.length) lines.push("", "This change would fail to publish:", ...[...new Set(problems)].map((problem) => `- ${problem}`));
-  fs10.writeFileSync(args["plan-file"], `${lines.join("\n")}
+  fs11.writeFileSync(args["plan-file"], `${lines.join("\n")}
 `);
   return { changed: false, commitSha: null };
 }

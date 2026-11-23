@@ -48,7 +48,10 @@ describe('the core CRDs as an unnamed release', () => {
     const landed = readRemote(world)
     expect(readTree(landed, 'site/raw/core/crds/v1.2.0')).toEqual({
       'index.yaml': CRDS_INDEX,
-      '.meta.json': meta({ source: 'acme/source', tag: 'v1.2.0', date: DATE, specHash: specHash(CORE_CRDS) }),
+      '.meta.json': meta({
+        source: 'acme/source', tag: 'v1.2.0', sourceRevision: git(source, 'rev-parse', 'HEAD'),
+        date: DATE, specHash: specHash(CORE_CRDS),
+      }),
     })
   })
 
