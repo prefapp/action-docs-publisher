@@ -19,7 +19,7 @@ usage() {
 Usage:
   sandbox.sh launch --sha <40-char-sha> [--run-id <id>]
   sandbox.sh doctor [--run-id <id>]
-  sandbox.sh wait-run --event <event> [--head-sha <sha>] [--branch <branch>] [--after <iso-ts>] [--timeout <sec>] [--allow-failure]
+  sandbox.sh wait-run --event <event> [--head-sha <sha>] [--branch <branch>] [--after <iso-ts>] [--timeout <sec>] [--allow-failure]   # --timeout defaults to 1800
   sandbox.sh capture --run-id <id> --feature <slug> --workflow-run-id <gh-run-id> [--pr <num>] [--docs-paths <p1,p2>]
   sandbox.sh cleanup --run-id <id>
 EOF
@@ -52,13 +52,18 @@ extract_docs_branch() {
   '
 }
 
+list_verify_refs() {
+  local repo="$1" prefix="$2"
+  gh api "repos/${repo}/git/matching-refs/${prefix}" --jq '[.[].ref] | join(",")' 2>/dev/null
+}
+
 active_workflow_runs() {
   gh run list -R "${SOURCE_REPO}" -w "${WORKFLOW_NAME}" -L 20 --json databaseId,status,event,url \
     --jq '.[] | select((.status == "in_progress" or .status == "queued" or .status == "waiting") and (.event != "pull_request")) | "\(.databaseId) \(.status) \(.event) \(.url)"'
 }
 
 wait_for_run() {
-  local event="" head_sha="" branch="" after="" timeout=300 allow_failure=0
+  local event="" head_sha="" branch="" after="" timeout=1800 allow_failure=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --event) event="$2"; shift 2 ;;
@@ -217,11 +222,15 @@ cmd_doctor() {
   gh auth status >/dev/null 2>&1 || die "gh is not authenticated"
 
   local wf pinned_sha docs_branch active_runs docs_main_sha
+  local docs_verify_branches features_verify_heads features_verify_tags
   wf="$(fetch_workflow)"
   pinned_sha="$(printf '%s\n' "${wf}" | extract_pinned_action)"
   docs_branch="$(printf '%s\n' "${wf}" | extract_docs_branch)"
   active_runs="$(active_workflow_runs)"
   docs_main_sha="$(gh api "repos/${DOCS_REPO}/git/ref/heads/main" --jq '.object.sha')"
+  docs_verify_branches="$(list_verify_refs "${DOCS_REPO}" "heads/verify-")" || docs_verify_branches="unknown"
+  features_verify_heads="$(list_verify_refs "${SOURCE_REPO}" "heads/verify-")" || features_verify_heads="unknown"
+  features_verify_tags="$(list_verify_refs "${SOURCE_REPO}" "tags/verify")" || features_verify_tags="unknown"
 
   echo "source_repo=${SOURCE_REPO}"
   echo "docs_repo=${DOCS_REPO}"
@@ -229,6 +238,9 @@ cmd_doctor() {
   echo "workflow_docs_branch=${docs_branch}"
   echo "docs_main_sha=${docs_main_sha}"
   echo "active_runs=${active_runs:-none}"
+  echo "docs_verify_branches=${docs_verify_branches:-none}"
+  echo "features_verify_heads=${features_verify_heads:-none}"
+  echo "features_verify_tags=${features_verify_tags:-none}"
 
   if [[ -n "${run_id}" ]]; then
     validate_run_id "${run_id}"
@@ -247,6 +259,13 @@ cmd_doctor() {
       || die "${DOCS_REPO} main moved: expected ${ORIG_DOCS_MAIN_SHA}, got ${docs_main_sha}"
     [[ -z "${active_runs}" ]] \
       || die "active runs present on ${SOURCE_REPO}: ${active_runs}"
+    echo "doctor=ok"
+  else
+    local leftover
+    leftover="docs_verify_branches=${docs_verify_branches:-none} features_verify_heads=${features_verify_heads:-none} features_verify_tags=${features_verify_tags:-none}"
+    if [[ -n "${docs_verify_branches}" || -n "${features_verify_heads}" || -n "${features_verify_tags}" ]]; then
+      die "sandbox not restored or verify refs unreadable: ${leftover}"
+    fi
     echo "doctor=ok"
   fi
 }

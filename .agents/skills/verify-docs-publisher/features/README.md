@@ -17,6 +17,7 @@ This directory is the maintained source for verifying the user-facing behavior o
 - Prefix every temporary PR branch with `verify-$RUN_ID-`.
 - Record a UTC timestamp (`TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"`) right before triggering `workflow_dispatch` or `release` events so `wait-run --after "$TS"` matches the new run.
 - Delete any semver test tag or release whose name does not include `verify-$RUN_ID` before running `sandbox.sh cleanup`.
+- The first Reconcile of a session evaluates every historical tag, so it runs much longer than later runs: `sandbox.sh wait-run` defaults to `--timeout 1800`. Pass a larger `--timeout` only when a run legitimately exceeds that.
 - Pushing to `pre-vieitesss/features` `main` triggers `release-please`, which may synchronize its open release PRs and start read-only `pull_request` plan runs. These runs do not write to `pre-vieitesss/docs-e2e` and do not block `sandbox.sh doctor`.
 - Never remove `/tmp/verify-docs-publisher-evidence/$RUN_ID/` during cleanup.
 
@@ -25,6 +26,7 @@ This directory is the maintained source for verifying the user-facing behavior o
 - Capture both the workflow run (`run.json`, `run.log`) and the resulting Docs repo state (`docs-commits.json`, fetched `docs-files/`) via `sandbox.sh capture`.
 - For Plan mode, also capture `pr-comments.json` with `--pr <number>`.
 - Check the `Record publish outputs` step in `run.log` or the job summary table for `run-mode`, `docs-changed`, and `docs-commit-sha`.
+- Read `docs-changed` from the `DOCS_CHANGED:` line of the `Record publish outputs` step in `run.log`; a `docs-changed: false` run prints `DOCS_COMMIT_SHA:` with no value. Grepping `run.log` directly for `docs-changed` is unreliable in a long run because the step prints env lines, not a summary line.
 - Report any unreachable entry point with the attempted command and the unmet precondition.
 - Do not report a skipped entry point as verified through a different path.
 

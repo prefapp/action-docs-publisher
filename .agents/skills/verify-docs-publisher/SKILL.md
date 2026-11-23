@@ -52,7 +52,7 @@ Run this read-only check before driving a feature and whenever a run behaves une
 4. `verify-<run-id>` exists on `pre-vieitesss/docs-e2e` and `pre-vieitesss/docs-e2e` `main` still points at `ORIG_DOCS_MAIN_SHA`.
 5. No mutating `docs-publisher.yml` run (`push`, `release`, `workflow_dispatch`) is currently active on `pre-vieitesss/features`. Read-only `pull_request` runs (such as `release-please` PR syncs triggered by a `main` push) do not block the lock.
 
-Run `"$SANDBOX" doctor` without `--run-id` to inspect the sandbox state before launching.
+Run `"$SANDBOX" doctor` without `--run-id` to inspect the sandbox state before launching and after `cleanup`. Without `--run-id` it also prints `docs_verify_branches`, `features_verify_heads`, and `features_verify_tags`, and exits non-zero when any of them is non-empty, so a restored sandbox proves it holds no leftover `verify-*` branch or tag.
 
 ## Drive
 
@@ -123,6 +123,6 @@ The skill ships one executable script: [scripts/sandbox.sh](scripts/sandbox.sh).
 | --- | --- |
 | `sandbox.sh launch --sha <40-char-sha> [--run-id <id>]` | Cut `verify-<run-id>` on `docs-e2e`, pin `features` workflow, wait for pin run. |
 | `sandbox.sh doctor [--run-id <id>]` | Read-only check of auth, workflow pin, branch existence, `docs-e2e` `main` integrity, and active runs. |
-| `sandbox.sh wait-run --event <event> [--head-sha <sha>] [--branch <branch>] [--after <iso-ts>] [--timeout <sec>] [--allow-failure]` | Wait for a matching `docs-publisher.yml` run to complete and print its JSON summary. |
+| `sandbox.sh wait-run --event <event> [--head-sha <sha>] [--branch <branch>] [--after <iso-ts>] [--timeout <sec>] [--allow-failure]` | Wait for a matching `docs-publisher.yml` run to complete and print its JSON summary. `--timeout` defaults to 1800 s because a first Reconcile evaluates every tag. |
 | `sandbox.sh capture --run-id <id> --feature <slug> --workflow-run-id <gh-run-id> [--pr <num>] [--docs-paths <p1,p2>]` | Save run metadata, logs, Docs repo commits, requested Docs repo files, and optional PR comments into `/tmp/verify-docs-publisher-evidence/<run-id>/<feature>/`. |
 | `sandbox.sh cleanup --run-id <id>` | Remove verification PRs, branches, tags, and `verify-<run-id>` on `docs-e2e`, restore `features` `main`, delete scratch workspace, and keep evidence. |
