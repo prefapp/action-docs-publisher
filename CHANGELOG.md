@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/prefapp/action-docs-publisher/compare/v1.0.1...v1.1.0) (2026-11-23)
+
+
+### Features
+
+* track skipped tags and republish moved tags ([#12](https://github.com/prefapp/action-docs-publisher/issues/12)) ([c1778d5](https://github.com/prefapp/action-docs-publisher/commit/c1778d52e10eb478c0c418eeaeaa4a4af5f39b17))
+
 ## [1.0.1](https://github.com/prefapp/action-docs-publisher/compare/v1.0.0...v1.0.1) (2026-11-18)
 
 
